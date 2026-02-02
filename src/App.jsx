@@ -59,6 +59,39 @@ function App() {
   const prevMonth = () => setCurrentDate(new Date(year, month - 1, 1));
   const nextMonth = () => setCurrentDate(new Date(year, month + 1, 1));
 
+  // Helper to check if a date is in current month
+  const isInCurrentMonth = (dateStr) => {
+    const d = new Date(dateStr);
+    return d.getMonth() === month && d.getFullYear() === year;
+  };
+
+  // Helper to check if a date has passed (up to today)
+  const hasDatePassed = (dateStr) => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const d = new Date(dateStr);
+    d.setHours(0, 0, 0, 0);
+    return d <= today;
+  };
+
+  // Helper to check if a day of month has passed
+  const hasDayPassed = (dayOfMonth) => {
+    const today = new Date();
+    const currentMonth = today.getMonth();
+    const currentYear = today.getFullYear();
+
+    // Only count as passed if we're in the current actual month
+    if (month === currentMonth && year === currentYear) {
+      return dayOfMonth <= today.getDate();
+    }
+    // If viewing past month, all days have passed
+    if (year < currentYear || (year === currentYear && month < currentMonth)) {
+      return true;
+    }
+    // If viewing future month, no days have passed
+    return false;
+  };
+
   const getEventsForDay = (day) => {
     const events = [];
     const dateStr = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
@@ -86,7 +119,7 @@ function App() {
         events.push({ type: "income", ...i });
       });
     savings
-      .filter((s) => s.month === month && s.year === year && s.day === day)
+      .filter((s) => s.date === dateStr)
       .forEach((s) => {
         events.push({ type: "savings", ...s });
       });
@@ -98,29 +131,85 @@ function App() {
     const now = new Date();
     const currentMonth = now.getMonth();
     const currentYear = now.getFullYear();
+    const todayDate = now.getDate();
 
-    const totalIncome = incomes.reduce((sum, i) => sum + i.amount, 0);
+    // Filter for current month
+    const thisMonthFree = freeExpenses.filter((e) => isInCurrentMonth(e.date));
+    const thisMonthForecasts = forecasts.filter((f) =>
+      isInCurrentMonth(f.date),
+    );
+    const thisMonthSavings = savings.filter((s) => isInCurrentMonth(s.date));
+
+    // --- CURRENT BALANCE (what has actually happened up to today) ---
+    // Income received (recurring that has passed + one-time that has passed)
+    const incomeReceived = incomes.reduce((sum, i) => {
+      if (i.isRecurring) {
+        if (hasDayPassed(i.dayOfMonth)) return sum + i.amount;
+      } else {
+        if (hasDatePassed(i.date) && isInCurrentMonth(i.date))
+          return sum + i.amount;
+      }
+      return sum;
+    }, 0);
+
+    // Fixed expenses paid (day has passed)
+    const fixedPaid = fixedExpenses
+      .filter((e) => e.active !== false && hasDayPassed(e.dayOfMonth))
+      .reduce((sum, e) => sum + e.amount, 0);
+
+    // Free expenses made (date has passed)
+    const freePaid = thisMonthFree
+      .filter((e) => hasDatePassed(e.date))
+      .reduce((sum, e) => sum + e.amount, 0);
+
+    // Forecasts completed
+    const forecastsPaid = thisMonthForecasts
+      .filter((f) => f.status === "completed" || hasDatePassed(f.date))
+      .reduce((sum, f) => sum + f.amount, 0);
+
+    // Savings made (date has passed)
+    const savingsMade = thisMonthSavings
+      .filter((s) => hasDatePassed(s.date))
+      .reduce((sum, s) => sum + s.amount, 0);
+
+    const currentBalance =
+      incomeReceived - savingsMade - fixedPaid - freePaid - forecastsPaid;
+
+    // --- MONTH-END FORECAST (estimation for end of month) ---
+    // Total expected income
+    const totalIncome = incomes.reduce((sum, i) => {
+      if (i.isRecurring) return sum + i.amount;
+      if (isInCurrentMonth(i.date)) return sum + i.amount;
+      return sum;
+    }, 0);
+
+    // Total fixed expenses
     const totalFixed = fixedExpenses
       .filter((e) => e.active !== false)
       .reduce((sum, e) => sum + e.amount, 0);
-    const totalForecasts = forecasts
+
+    // Total forecasts (pending)
+    const totalForecasts = thisMonthForecasts
       .filter((f) => f.status === "pending")
       .reduce((sum, f) => sum + f.amount, 0);
 
-    const thisMonthFree = freeExpenses.filter((e) => {
-      const d = new Date(e.date);
-      return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
-    });
+    // Total free expenses this month
     const totalFreeExpenses = thisMonthFree.reduce(
       (sum, e) => sum + e.amount,
       0,
     );
 
-    const thisMonthSavings = savings.filter(
-      (s) => s.month === currentMonth && s.year === currentYear,
-    );
+    // Total savings this month
     const totalSavings = thisMonthSavings.reduce((sum, s) => sum + s.amount, 0);
 
+    const monthEndForecast =
+      totalIncome -
+      totalSavings -
+      totalFixed -
+      totalForecasts -
+      totalFreeExpenses;
+
+    // Weekly budget calculation
     const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
     const weeklySpent = freeExpenses
       .filter((e) => new Date(e.date) >= weekAgo)
@@ -128,10 +217,10 @@ function App() {
 
     const weeklyBudget = settings?.weeklyBudget || 0;
     const weeklyRemaining = weeklyBudget - weeklySpent;
-    const monthlyAvailable =
-      totalIncome - totalFixed - totalForecasts - totalSavings;
 
     return {
+      currentBalance,
+      monthEndForecast,
       totalIncome,
       totalFixed,
       totalForecasts,
@@ -140,7 +229,6 @@ function App() {
       weeklySpent,
       weeklyBudget,
       weeklyRemaining,
-      monthlyAvailable,
     };
   };
 
@@ -155,6 +243,38 @@ function App() {
     setModal({ type: null, data: null });
     setSelectedDay(null);
     loadAllData();
+  };
+
+  // Delete handlers
+  const handleDelete = async (type, id) => {
+    if (!confirm("Are you sure you want to delete this?")) return;
+
+    switch (type) {
+      case "free":
+        await db.freeExpenses.delete(id);
+        break;
+      case "fixed":
+        await db.fixedExpenses.delete(id);
+        break;
+      case "forecast":
+        await db.forecasts.delete(id);
+        break;
+      case "income":
+        await db.incomes.delete(id);
+        break;
+      case "savings":
+        await db.savings.delete(id);
+        break;
+    }
+    loadAllData();
+  };
+
+  // Edit handler - opens edit modal
+  const handleEdit = (type, item) => {
+    setModal({
+      type: `edit${type.charAt(0).toUpperCase() + type.slice(1)}`,
+      data: item,
+    });
   };
 
   const calendarDays = [];
@@ -174,8 +294,34 @@ function App() {
       <h1 className="text-4xl font-bold text-center mb-6">Whizzfin</h1>
 
       {/* Dashboard Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-3 gap-4 mb-8">
-        <div className="p-4  bg-boxed rounded-lg text-center shadow-sm ">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+        {/* Main metrics - larger */}
+        <div className="p-4 bg-boxed rounded-lg text-center shadow-sm col-span-2">
+          <div className="text-xs text-discret">Current Balance</div>
+          <div
+            className={`text-3xl font-bold ${dashboard.currentBalance >= 0 ? "text-emerald-500" : "text-red-500"}`}
+          >
+            {dashboard.currentBalance.toFixed(2)}€
+          </div>
+          <div className="text-xs text-discret mt-1">
+            What you have right now
+          </div>
+        </div>
+
+        <div className="p-4 bg-boxed rounded-lg text-center shadow-sm col-span-2">
+          <div className="text-xs text-discret">Month-End Forecast</div>
+          <div
+            className={`text-3xl font-bold ${dashboard.monthEndForecast >= 0 ? "text-blue-500" : "text-red-500"}`}
+          >
+            {dashboard.monthEndForecast.toFixed(2)}€
+          </div>
+          <div className="text-xs text-discret mt-1">
+            Expected at end of month
+          </div>
+        </div>
+
+        {/* Secondary metrics */}
+        <div className="p-4 bg-boxed rounded-lg text-center shadow-sm">
           <div className="text-xs text-discret">Weekly Budget</div>
           <div
             className={`text-2xl font-bold ${dashboard.weeklyRemaining >= 0 ? "text-emerald-500" : "text-red-500"}`}
@@ -200,21 +346,9 @@ function App() {
           </div>
         </div>
         <div className="p-4 bg-boxed rounded-lg text-center shadow-sm">
-          <div className="text-xs text-discret">Forecasts</div>
-          <div className="text-2xl font-bold text-yellow-500">
-            {dashboard.totalForecasts.toFixed(2)}€
-          </div>
-        </div>
-        <div className="p-4 bg-boxed rounded-lg text-center shadow-sm">
           <div className="text-xs text-discret">Savings</div>
           <div className="text-2xl font-bold text-emerald-500">
             {dashboard.totalSavings.toFixed(2)}€
-          </div>
-        </div>
-        <div className="p-4 bg-boxed rounded-lg text-center shadow-sm">
-          <div className="text-xs text-discret">Available</div>
-          <div className="text-2xl font-bold">
-            {dashboard.monthlyAvailable.toFixed(2)}€
           </div>
         </div>
       </div>
@@ -223,7 +357,7 @@ function App() {
       <div className="flex items-center justify-center gap-4 mb-6">
         <button
           onClick={prevMonth}
-          className="px-2 py-2 text-discret bg-contour rounded hover:bg-gray-700"
+          className="px-2 py-2 text-discret rounded hover:bg-contour"
         >
           <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -232,10 +366,9 @@ function App() {
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            class="icon icon-tabler icons-tabler-outline icon-tabler-chevron-left"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
           >
             <path stroke="none" d="M0 0h24v24H0z" fill="none" />
             <path d="M15 6l-6 6l6 6" />
@@ -246,7 +379,7 @@ function App() {
         </h2>
         <button
           onClick={nextMonth}
-          className="px-2 py-2 text-discret bg-contour rounded hover:bg-gray-700"
+          className="px-2 py-2 text-discret rounded hover:bg-contour"
         >
           <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -255,10 +388,9 @@ function App() {
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            class="icon icon-tabler icons-tabler-outline icon-tabler-chevron-right"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
           >
             <path stroke="none" d="M0 0h24v24H0z" fill="none" />
             <path d="M9 6l6 6l-6 6" />
@@ -297,12 +429,7 @@ function App() {
             {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d, i) => (
               <th
                 key={d}
-                className={`
-            p-2 border-b border-r border-contour text-sm bg-select font-bold
-            last:border-r-0
-            ${i === 0 ? "rounded-tl-xl" : ""} 
-            ${i === 6 ? "rounded-tr-xl" : ""}
-          `}
+                className={`p-2 border-b border-r border-contour text-sm bg-select font-bold last:border-r-0 ${i === 0 ? "rounded-tl-xl" : ""} ${i === 6 ? "rounded-tr-xl" : ""}`}
               >
                 {d}
               </th>
@@ -316,11 +443,7 @@ function App() {
                 {calendarDays.slice(wi * 7, (wi + 1) * 7).map((day, di) => (
                   <td
                     key={di}
-                    className={`
-              border-b border-r border-contour p-1 align-top h-24 text-xs cursor-pointer 
-              hover:bg-select transition-colors last:border-r-0
-              ${wi === Math.ceil(calendarDays.length / 7) - 1 ? "border-b-0" : ""}
-            `}
+                    className={`border-b border-r border-contour p-1 align-top h-24 text-xs cursor-pointer hover:bg-select transition-colors last:border-r-0 ${wi === Math.ceil(calendarDays.length / 7) - 1 ? "border-b-0" : ""}`}
                     onClick={() => day && handleDayClick(day)}
                   >
                     {day && (
@@ -403,44 +526,73 @@ function App() {
       </div>
 
       {/* MODALS */}
+
+      {/* Day Actions Modal */}
       <Modal
         isOpen={modal.type === "dayActions"}
         onClose={closeModal}
         title={`${monthNames[month]} ${modal.data?.day}, ${year}`}
       >
         <div className="flex flex-col gap-3">
-          <button
-            className="px-4 py-2 bg-blue-500 text-white rounded"
-            onClick={() =>
-              setModal({ type: "freeExpense", data: { day: modal.data?.day } })
-            }
-          >
-            Add Free Expense
-          </button>
-          <button
-            className="px-4 py-2 bg-yellow-400 rounded"
-            onClick={() =>
-              setModal({ type: "forecast", data: { day: modal.data?.day } })
-            }
-          >
-            Add Forecast
-          </button>
-          <button
-            className="px-4 py-2 bg-emerald-500 text-white rounded"
-            onClick={() =>
-              setModal({ type: "savings", data: { day: modal.data?.day } })
-            }
-          >
-            Add Savings
-          </button>
+          <div className="flex gap-2">
+            <button
+              className="flex-1 px-4 py-2 bg-blue-500 text-white rounded"
+              onClick={() =>
+                setModal({
+                  type: "freeExpense",
+                  data: { day: modal.data?.day },
+                })
+              }
+            >
+              + Free
+            </button>
+            <button
+              className="flex-1 px-4 py-2 bg-yellow-400 rounded"
+              onClick={() =>
+                setModal({ type: "forecast", data: { day: modal.data?.day } })
+              }
+            >
+              + Forecast
+            </button>
+            <button
+              className="flex-1 px-4 py-2 bg-emerald-500 text-white rounded"
+              onClick={() =>
+                setModal({ type: "savings", data: { day: modal.data?.day } })
+              }
+            >
+              + Savings
+            </button>
+          </div>
           <hr className="my-2" />
           <h4 className="font-semibold">Events on this day:</h4>
           {modal.data?.day &&
             getEventsForDay(modal.data.day).map((e, i) => (
-              <div key={i} className={`${eventColors[e.type]} p-2 rounded`}>
-                <strong>{e.title || e.type}</strong>:{" "}
-                {e.type === "income" || e.type === "savings" ? "+" : "-"}
-                {e.amount}€
+              <div
+                key={i}
+                className={`${eventColors[e.type]} p-3 rounded flex justify-between items-center`}
+              >
+                <div>
+                  <strong>{e.title || e.type}</strong>:{" "}
+                  {e.type === "income" || e.type === "savings" ? "+" : "-"}
+                  {e.amount}€
+                  {e.description && (
+                    <div className="text-xs opacity-75">{e.description}</div>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => handleEdit(e.type, e)}
+                    className="px-2 py-1 bg-white/20 rounded text-xs hover:bg-white/30"
+                  >
+                    Edit
+                  </button>
+                  <button
+                    onClick={() => handleDelete(e.type, e.id)}
+                    className="px-2 py-1 bg-red-600 text-white rounded text-xs hover:bg-red-700"
+                  >
+                    Delete
+                  </button>
+                </div>
               </div>
             ))}
           {modal.data?.day && getEventsForDay(modal.data.day).length === 0 && (
@@ -449,6 +601,7 @@ function App() {
         </div>
       </Modal>
 
+      {/* Add Modals */}
       <Modal
         isOpen={modal.type === "freeExpense"}
         onClose={closeModal}
@@ -521,34 +674,115 @@ function App() {
       >
         <SettingsForm settings={settings} onSave={closeModal} />
       </Modal>
+
+      {/* Edit Modals */}
+      <Modal
+        isOpen={modal.type === "editFree"}
+        onClose={closeModal}
+        title="Edit Free Expense"
+      >
+        <FreeExpenseForm
+          categories={categories}
+          year={year}
+          month={month}
+          onSave={closeModal}
+          editData={modal.data}
+        />
+      </Modal>
+
+      <Modal
+        isOpen={modal.type === "editFixed"}
+        onClose={closeModal}
+        title="Edit Fixed Expense"
+      >
+        <FixedExpenseForm
+          categories={categories}
+          onSave={closeModal}
+          editData={modal.data}
+        />
+      </Modal>
+
+      <Modal
+        isOpen={modal.type === "editForecast"}
+        onClose={closeModal}
+        title="Edit Forecast"
+      >
+        <ForecastForm
+          categories={categories}
+          year={year}
+          month={month}
+          onSave={closeModal}
+          editData={modal.data}
+        />
+      </Modal>
+
+      <Modal
+        isOpen={modal.type === "editIncome"}
+        onClose={closeModal}
+        title="Edit Income"
+      >
+        <IncomeForm onSave={closeModal} editData={modal.data} />
+      </Modal>
+
+      <Modal
+        isOpen={modal.type === "editSavings"}
+        onClose={closeModal}
+        title="Edit Savings"
+      >
+        <SavingsForm
+          year={year}
+          month={month}
+          onSave={closeModal}
+          editData={modal.data}
+        />
+      </Modal>
     </div>
   );
 }
 
 // FORM COMPONENTS
 
-function FreeExpenseForm({ categories, defaultDay, year, month, onSave }) {
-  const defaultDate = defaultDay
-    ? `${year}-${String(month + 1).padStart(2, "0")}-${String(defaultDay).padStart(2, "0")}`
-    : new Date().toISOString().split("T")[0];
+function FreeExpenseForm({
+  categories,
+  defaultDay,
+  year,
+  month,
+  onSave,
+  editData,
+}) {
+  const defaultDate =
+    editData?.date ||
+    (defaultDay
+      ? `${year}-${String(month + 1).padStart(2, "0")}-${String(defaultDay).padStart(2, "0")}`
+      : new Date().toISOString().split("T")[0]);
 
   const [form, setForm] = useState({
-    amount: "",
-    title: "",
-    description: "",
+    amount: editData?.amount || "",
+    title: editData?.title || "",
+    description: editData?.description || "",
     date: defaultDate,
-    categoryId: categories[0]?.id || "",
+    categoryId: editData?.categoryId || categories[0]?.id || "",
   });
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!form.amount || !form.title) return;
-    await db.freeExpenses.add({
+
+    const data = {
       ...form,
       amount: Number(form.amount),
       categoryId: Number(form.categoryId),
-      createdAt: new Date().toISOString(),
-    });
+      updatedAt: new Date().toISOString(),
+    };
+
+    if (editData?.id) {
+      await db.freeExpenses.update(editData.id, data);
+    } else {
+      await db.freeExpenses.add({
+        ...data,
+        createdAt: new Date().toISOString(),
+      });
+    }
     onSave();
   };
 
@@ -599,32 +833,42 @@ function FreeExpenseForm({ categories, defaultDay, year, month, onSave }) {
         type="submit"
         className="w-full p-2 bg-blue-500 text-white rounded hover:bg-blue-600"
       >
-        Add Expense
+        {editData ? "Update" : "Add"} Expense
       </button>
     </form>
   );
 }
 
-function FixedExpenseForm({ categories, onSave }) {
+function FixedExpenseForm({ categories, onSave, editData }) {
   const [form, setForm] = useState({
-    amount: "",
-    title: "",
-    description: "",
-    dayOfMonth: 1,
-    categoryId: categories[0]?.id || "",
+    amount: editData?.amount || "",
+    title: editData?.title || "",
+    description: editData?.description || "",
+    dayOfMonth: editData?.dayOfMonth || 1,
+    categoryId: editData?.categoryId || categories[0]?.id || "",
   });
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!form.amount || !form.title) return;
-    await db.fixedExpenses.add({
+
+    const data = {
       ...form,
       amount: Number(form.amount),
       dayOfMonth: Number(form.dayOfMonth),
       categoryId: Number(form.categoryId),
       active: true,
-      createdAt: new Date().toISOString(),
-    });
+      updatedAt: new Date().toISOString(),
+    };
+
+    if (editData?.id) {
+      await db.fixedExpenses.update(editData.id, data);
+    } else {
+      await db.fixedExpenses.add({
+        ...data,
+        createdAt: new Date().toISOString(),
+      });
+    }
     onSave();
   };
 
@@ -678,36 +922,52 @@ function FixedExpenseForm({ categories, onSave }) {
         type="submit"
         className="w-full p-2 bg-red-400 text-white rounded hover:bg-red-500"
       >
-        Add Fixed Expense
+        {editData ? "Update" : "Add"} Fixed Expense
       </button>
     </form>
   );
 }
 
-function ForecastForm({ categories, defaultDay, year, month, onSave }) {
-  const defaultDate = defaultDay
-    ? `${year}-${String(month + 1).padStart(2, "0")}-${String(defaultDay).padStart(2, "0")}`
-    : new Date().toISOString().split("T")[0];
+function ForecastForm({
+  categories,
+  defaultDay,
+  year,
+  month,
+  onSave,
+  editData,
+}) {
+  const defaultDate =
+    editData?.date ||
+    (defaultDay
+      ? `${year}-${String(month + 1).padStart(2, "0")}-${String(defaultDay).padStart(2, "0")}`
+      : new Date().toISOString().split("T")[0]);
 
   const [form, setForm] = useState({
-    amount: "",
-    title: "",
-    description: "",
+    amount: editData?.amount || "",
+    title: editData?.title || "",
+    description: editData?.description || "",
     date: defaultDate,
-    categoryId: categories[0]?.id || "",
-    deductFrom: "monthly",
+    categoryId: editData?.categoryId || categories[0]?.id || "",
+    deductFrom: editData?.deductFrom || "monthly",
+    status: editData?.status || "pending",
   });
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!form.amount || !form.title) return;
-    await db.forecasts.add({
+
+    const data = {
       ...form,
       amount: Number(form.amount),
       categoryId: Number(form.categoryId),
-      status: "pending",
-      createdAt: new Date().toISOString(),
-    });
+      updatedAt: new Date().toISOString(),
+    };
+
+    if (editData?.id) {
+      await db.forecasts.update(editData.id, data);
+    } else {
+      await db.forecasts.add({ ...data, createdAt: new Date().toISOString() });
+    }
     onSave();
   };
 
@@ -762,35 +1022,52 @@ function ForecastForm({ categories, defaultDay, year, month, onSave }) {
         <option value="monthly">Deduct from monthly budget</option>
         <option value="weekly">Deduct from weekly budget</option>
       </select>
+      {editData && (
+        <select
+          value={form.status}
+          onChange={(e) => setForm({ ...form, status: e.target.value })}
+          className="w-full p-2 border rounded"
+        >
+          <option value="pending">Pending</option>
+          <option value="completed">Completed</option>
+        </select>
+      )}
       <button
         type="submit"
         className="w-full p-2 bg-yellow-400 rounded hover:bg-yellow-500"
       >
-        Add Forecast
+        {editData ? "Update" : "Add"} Forecast
       </button>
     </form>
   );
 }
 
-function IncomeForm({ onSave }) {
+function IncomeForm({ onSave, editData }) {
   const [form, setForm] = useState({
-    amount: "",
-    title: "",
-    description: "",
-    date: new Date().toISOString().split("T")[0],
-    isRecurring: false,
-    dayOfMonth: 1,
+    amount: editData?.amount || "",
+    title: editData?.title || "",
+    description: editData?.description || "",
+    date: editData?.date || new Date().toISOString().split("T")[0],
+    isRecurring: editData?.isRecurring || false,
+    dayOfMonth: editData?.dayOfMonth || 1,
   });
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!form.amount || !form.title) return;
-    await db.incomes.add({
+
+    const data = {
       ...form,
       amount: Number(form.amount),
       dayOfMonth: Number(form.dayOfMonth),
-      createdAt: new Date().toISOString(),
-    });
+      updatedAt: new Date().toISOString(),
+    };
+
+    if (editData?.id) {
+      await db.incomes.update(editData.id, data);
+    } else {
+      await db.incomes.add({ ...data, createdAt: new Date().toISOString() });
+    }
     onSave();
   };
 
@@ -850,30 +1127,41 @@ function IncomeForm({ onSave }) {
         type="submit"
         className="w-full p-2 bg-purple-600 text-white rounded hover:bg-purple-700"
       >
-        Add Income
+        {editData ? "Update" : "Add"} Income
       </button>
     </form>
   );
 }
 
-function SavingsForm({ defaultDay, year, month, onSave }) {
+function SavingsForm({ defaultDay, year, month, onSave, editData }) {
+  const defaultDate =
+    editData?.date ||
+    (defaultDay
+      ? `${year}-${String(month + 1).padStart(2, "0")}-${String(defaultDay).padStart(2, "0")}`
+      : new Date().toISOString().split("T")[0]);
+
   const [form, setForm] = useState({
-    amount: "",
-    description: "",
-    day: defaultDay || new Date().getDate(),
+    amount: editData?.amount || "",
+    description: editData?.description || "",
+    date: defaultDate,
   });
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!form.amount) return;
-    await db.savings.add({
+
+    const data = {
       amount: Number(form.amount),
       description: form.description,
-      day: Number(form.day),
-      month: month,
-      year: year,
-      createdAt: new Date().toISOString(),
-    });
+      date: form.date,
+      updatedAt: new Date().toISOString(),
+    };
+
+    if (editData?.id) {
+      await db.savings.update(editData.id, data);
+    } else {
+      await db.savings.add({ ...data, createdAt: new Date().toISOString() });
+    }
     onSave();
   };
 
@@ -896,19 +1184,16 @@ function SavingsForm({ defaultDay, year, month, onSave }) {
         className="w-full p-2 border rounded"
       />
       <input
-        type="number"
-        min="1"
-        max="31"
-        placeholder="Day"
-        value={form.day}
-        onChange={(e) => setForm({ ...form, day: e.target.value })}
+        type="date"
+        value={form.date}
+        onChange={(e) => setForm({ ...form, date: e.target.value })}
         className="w-full p-2 border rounded"
       />
       <button
         type="submit"
         className="w-full p-2 bg-emerald-500 text-white rounded hover:bg-emerald-600"
       >
-        Add Savings
+        {editData ? "Update" : "Add"} Savings
       </button>
     </form>
   );

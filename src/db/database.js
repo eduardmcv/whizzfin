@@ -4,14 +4,14 @@ import Dexie from "dexie";
 const db = new Dexie("whizzfin");
 
 // Define tables and their columns (schema)
-db.version(2).stores({
+db.version(3).stores({
   settings: "++id",
   categories: "++id, name",
   freeExpenses: "++id, date, categoryId",
-  fixedExpenses: "++id, month, categoryId",
+  fixedExpenses: "++id, dayOfMonth, categoryId",
   forecasts: "++id, date, categoryId",
-  incomes: "++id, month",
-  savings: "++id, month, year",
+  incomes: "++id, date, dayOfMonth",
+  savings: "++id, date",
 });
 
 export default db;
