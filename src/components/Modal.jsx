@@ -1,42 +1,18 @@
 function Modal({ isOpen, onClose, title, children }) {
   if (!isOpen) return null;
 
-  const overlayStyle = {
-    position: 'fixed',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 1000
-  };
-
-  const modalStyle = {
-    backgroundColor: '#fff',
-    padding: '20px',
-    borderRadius: '8px',
-    minWidth: '400px',
-    maxWidth: '90%',
-    maxHeight: '90vh',
-    overflow: 'auto'
-  };
-
-  const headerStyle = {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: '20px'
-  };
-
   return (
-    <div style={overlayStyle} onClick={onClose}>
-      <div style={modalStyle} onClick={(e) => e.stopPropagation()}>
-        <div style={headerStyle}>
-          <h2 style={{ margin: 0 }}>{title}</h2>
-          <button onClick={onClose} style={{ fontSize: '20px', border: 'none', background: 'none', cursor: 'pointer' }}>
+    <div
+      className="fixed inset-0 bg-black/75 flex items-center justify-center z-50"
+      onClick={onClose}
+    >
+      <div
+        className="bg-primary p-5 rounded-lg min-w-[400px] max-w-[90%] max-h-[90vh] overflow-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex justify-between items-center mb-4">
+          <h2 className="text-xl font-semibold">{title}</h2>
+          <button onClick={onClose} className="text-2xl hover:bg-select">
             ✕
           </button>
         </div>
