@@ -7,69 +7,70 @@
 }
 
 @theme {
-  --color-primary: #0d1117;
-  --color-secondary: #f0f6fc;
-  --color-select: #151b23;
-  --color-boxed: #151b23;
-  --color-contour: #262c36;
-  --color-discret: #9198a1;
+  /* GRAYS */
+  /* Backgrounds */
+  --color-gray-1: #111113;
+  --color-gray-2: #19191b;
+  /* Interactive components */
+  --color-gray-3: #222325;
+  --color-gray-4: #292a2e;
+  --color-gray-5: #303136;
+  /* Borders and separators */
+  --color-gray-6: #393a40;
+  --color-gray-7: #46484f;
+  --color-gray-8: #5f606a;
+  /* Solid colors */
+  --color-gray-9: #6c6e79;
+  --color-gray-10: #797b86;
+  /* Accessible text */
+  --color-gray-11: #b2b3bd;
+  --color-gray-12: #eeeef0;
+
+  /* BLUES */
+  /* Backgrounds */
+  --color-blue-1: #0c111c;
+  --color-blue-2: #111725;
+  /* Interactive components */
+  --color-blue-3: #172448;
+  --color-blue-4: #1d2e61;
+  --color-blue-5: #243974;
+  /* Borders and separators */
+  --color-blue-6: #2d4484;
+  --color-blue-7: #375098;
+  --color-blue-8: #405eb2;
+  /* Solid colors */
+  --color-blue-9: #3d63dd;
+  --color-blue-10: #3f5cb0;
+  /* Accessible text */
+  --color-blue-11: #93b4ff;
+  --color-blue-12: #d5e2ff;
+
+  /* Semantic colors */
+  --color-background: #111113;
+  --color-surface: #19191b;
+  --color-border: #303136;
+  --color-text: #eeeef0;
+  --color-text-muted: #b2b3bd;
 }
 
 body {
-  @apply bg-primary;
-  @apply text-secondary;
+  @apply bg-background text-text;
 }
 
-/* a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
-}
-a:hover {
-  color: #535bf2;
-}
-
-body {
-  margin: 0;
-  display: flex;
-  place-items: center;
-  min-width: 320px;
-  min-height: 100vh;
-}
-
-h1 {
-  font-size: 3.2em;
-  line-height: 1.1;
-}
-
-button {
-  border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 500;
-  font-family: inherit;
-  background-color: #1a1a1a;
+/* Date picker icon */
+input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: invert(1);
   cursor: pointer;
-  transition: border-color 0.25s;
-}
-button:hover {
-  border-color: #646cff;
-}
-button:focus,
-button:focus-visible {
-  outline: 4px auto -webkit-focus-ring-color;
 }
 
-@media (prefers-color-scheme: light) {
-  :root {
-    color: #213547;
-    background-color: #ffffff;
-  }
-  a:hover {
-    color: #747bff;
-  }
-  button {
-    background-color: #f9f9f9;
-  }
-} */
+/* Date picker and number input styling */
+input[type="date"],
+input[type="number"] {
+  color-scheme: dark;
+}
+
+/* Number input spinner */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  opacity: 1;
+}
