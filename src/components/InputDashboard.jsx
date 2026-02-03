@@ -7,7 +7,7 @@ function InputDashboard({ data, onOpenModal }) {
         className="cursor-pointer group relative overflow-hidden p-4 bg-surface rounded-lg text-center shadow-sm col-span-3"
       >
         <div className="text-xs text-text-muted">Monthly Income</div>
-        <div className="text-xl font-semibold text-blue-300">
+        <div className="nr-500 text-xl font-semibold text-blue-300">
           {data.totalIncome.toFixed(2)}€
         </div>
         <div
@@ -39,7 +39,7 @@ function InputDashboard({ data, onOpenModal }) {
         className="cursor-pointer group relative overflow-hidden p-4 bg-surface rounded-lg text-center shadow-sm col-span-3"
       >
         <div className="text-xs text-text-muted">Savings</div>
-        <div className="text-xl font-semibold text-emerald-300">
+        <div className="nr-500 text-xl font-semibold text-emerald-300">
           {data.totalSavings.toFixed(2)}€
         </div>
         <div
@@ -71,7 +71,7 @@ function InputDashboard({ data, onOpenModal }) {
         className="cursor-pointer group relative overflow-hidden p-4 bg-surface rounded-lg text-center shadow-sm col-span-2"
       >
         <div className="text-xs text-text-muted">Forecasts</div>
-        <div className="text-xl font-semibold text-orange-300">
+        <div className="nr-500 text-xl font-semibold text-orange-300">
           {data.totalForecasts.toFixed(2)}€
         </div>
         <div
@@ -103,7 +103,7 @@ function InputDashboard({ data, onOpenModal }) {
         className="cursor-pointer group relative overflow-hidden p-4 bg-surface rounded-lg text-center shadow-sm col-span-2"
       >
         <div className="text-xs text-text-muted">Fixed Expenses</div>
-        <div className="text-xl font-semibold text-purple-400">
+        <div className="nr-500 text-xl font-semibold text-purple-400">
           {data.totalFixed.toFixed(2)}€
         </div>
         <div
@@ -129,14 +129,19 @@ function InputDashboard({ data, onOpenModal }) {
         </div>
       </button>
 
-      {/* Free Expenses - Red */}
+      {/* Weekly Budgets - Red - Similar to main dashboard style */}
       <button
         onClick={() => onOpenModal("freeExpense")}
-        className="cursor-pointer group relative overflow-hidden p-4 bg-surface rounded-lg text-center shadow-sm col-span-2"
+        className="cursor-pointer group relative overflow-hidden p-4 bg-red-950/30 border-red-900/50 border rounded-lg text-center shadow-sm col-span-2"
       >
-        <div className="text-xs text-text-muted">Free Expenses</div>
-        <div className="text-xl font-semibold text-red-400">
-          {data.totalFreeExpenses.toFixed(2)}€
+        <div className="text-xs text-text-muted">Weekly Budgets</div>
+        <div
+          className={`nr-500 text-xl font-semibold ${data.totalWeeklyRemaining >= 0 ? "text-text" : "text-red-400"}`}
+        >
+          {data.totalWeeklyRemaining.toFixed(2)}€
+        </div>
+        <div className="nr-500 text-xs text-text-muted">
+          / {data.totalWeeklyBudgets.toFixed(0)}€
         </div>
         <div
           className="absolute -bottom-1.5 -right-1.5 p-2 bg-red-500 rounded-4xl 
@@ -227,7 +232,7 @@ function InputDashboard({ data, onOpenModal }) {
       <div className="p-4 bg-surface/50 rounded-lg text-center shadow-sm col-span-2">
         <div className="text-xs text-text-muted">Current Balance</div>
         <div
-          className={`text-xl font-semibold ${data.currentBalance >= 0 ? "text-text" : "text-red-500"}`}
+          className={`nr-500 text-xl font-semibold ${data.currentBalance >= 0 ? "text-text" : "text-red-500"}`}
         >
           {data.currentBalance.toFixed(2)}€
         </div>

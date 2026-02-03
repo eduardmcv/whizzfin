@@ -1,7 +1,11 @@
 @import "tailwindcss";
 
 :root {
-  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
+  --font-main-numbers: "Lexend Exa", sans-serif;
+  --font-main-texts: "Figtree", sans-serif;
+
+  font-family: "Outfit", system-ui, Avenir, Helvetica, Arial, sans-serif;
+
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -73,4 +77,66 @@ input[type="number"] {
 input[type="number"]::-webkit-inner-spin-button,
 input[type="number"]::-webkit-outer-spin-button {
   opacity: 1;
+}
+
+.nr-100 {
+  font-family: var(--font-main-numbers);
+  font-weight: 100;
+}
+.nr-200 {
+  font-family: var(--font-main-numbers);
+  font-weight: 200;
+}
+.nr-300 {
+  font-family: var(--font-main-numbers);
+  font-weight: 300;
+}
+.nr-400 {
+  font-family: var(--font-main-numbers);
+  font-weight: 400;
+}
+.nr-500 {
+  font-family: var(--font-main-numbers);
+  font-weight: 500;
+}
+.nr-600 {
+  font-family: var(--font-main-numbers);
+  font-weight: 600;
+}
+.nr-700 {
+  font-family: var(--font-main-numbers);
+  font-weight: 700;
+}
+.nr-800 {
+  font-family: var(--font-main-numbers);
+  font-weight: 800;
+}
+
+.txt-300 {
+  font-family: var(--font-main-texts);
+  font-weight: 300;
+}
+.txt-400 {
+  font-family: var(--font-main-texts);
+  font-weight: 400;
+}
+.txt-500 {
+  font-family: var(--font-main-texts);
+  font-weight: 500;
+}
+.txt-600 {
+  font-family: var(--font-main-texts);
+  font-weight: 600;
+}
+.txt-700 {
+  font-family: var(--font-main-texts);
+  font-weight: 700;
+}
+.txt-800 {
+  font-family: var(--font-main-texts);
+  font-weight: 800;
+}
+.txt-900 {
+  font-family: var(--font-main-texts);
+  font-weight: 900;
 }
