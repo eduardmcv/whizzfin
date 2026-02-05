@@ -1,5 +1,7 @@
 import { useState } from "react";
 import db from "../../db/database";
+import CategorySelect from "./CategorySelect";
+import FormInfoText from "./FormInfoText";
 
 function ForecastForm({
   categories,
@@ -8,6 +10,7 @@ function ForecastForm({
   month,
   onSave,
   editData,
+  onCategoriesChanged,
 }) {
   const defaultDate =
     editData?.date ||
@@ -20,14 +23,14 @@ function ForecastForm({
     title: editData?.title || "",
     description: editData?.description || "",
     date: defaultDate,
-    categoryId: editData?.categoryId || categories[0]?.id || "",
+    categoryId: editData?.categoryId || "",
     deductFrom: editData?.deductFrom || "monthly",
     status: editData?.status || "pending",
   });
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!form.amount || !form.title) return;
+    if (!form.amount || !form.title || !form.categoryId) return;
 
     const data = {
       ...form,
@@ -44,8 +47,17 @@ function ForecastForm({
     onSave();
   };
 
+  const handleCategoryAdded = async (newId) => {
+    if (onCategoriesChanged) {
+      await onCategoriesChanged();
+    }
+    setForm({ ...form, categoryId: newId });
+  };
+
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+      <FormInfoText>Your info text here for forecasts.</FormInfoText>
+
       <input
         type="text"
         placeholder="Title (e.g. Haircut)"
@@ -78,17 +90,14 @@ function ForecastForm({
           required
         />
       </div>
-      <select
+      <CategorySelect
+        categories={categories}
+        type="expense"
         value={form.categoryId}
-        onChange={(e) => setForm({ ...form, categoryId: e.target.value })}
-        className="w-full p-2 border border-border rounded bg-background text-text"
-      >
-        {categories.map((c) => (
-          <option key={c.id} value={c.id}>
-            {c.name}
-          </option>
-        ))}
-      </select>
+        onChange={(val) => setForm({ ...form, categoryId: val })}
+        onCategoryAdded={handleCategoryAdded}
+        required
+      />
       <select
         value={form.deductFrom}
         onChange={(e) => setForm({ ...form, deductFrom: e.target.value })}

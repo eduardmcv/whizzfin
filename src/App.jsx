@@ -6,6 +6,13 @@ import MainDashboard from "./components/MainDashboard";
 import InputDashboard from "./components/InputDashboard";
 import CalendarNavigation from "./components/CalendarNavigation";
 import DayActionsModal from "./components/DayActionsModal";
+import PendingAssignmentsModal from "./components/PendingAssignmentsModal";
+import {
+  getRecurringItemsForMonth,
+  getPendingAssignmentsCount,
+  getAdjustedDay,
+  formatYearMonth,
+} from "./lib/recurring";
 
 import FreeExpenseForm from "./components/forms/FreeExpenseForm";
 import FixedExpenseForm from "./components/forms/FixedExpenseForm";
@@ -27,14 +34,15 @@ function App() {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [modal, setModal] = useState({ type: null, data: null });
   const [selectedDay, setSelectedDay] = useState(null);
+  const [recurringInstances, setRecurringInstances] = useState([]);
 
   useEffect(() => {
     loadAllData();
   }, [currentDate]);
 
   const loadAllData = async () => {
-    const [set, cats, free, fixed, fore, inc, sav, weekBud] = await Promise.all(
-      [
+    const [set, cats, free, fixed, fore, inc, sav, weekBud, recInst] =
+      await Promise.all([
         db.settings.get(1),
         db.categories.toArray(),
         db.freeExpenses.toArray(),
@@ -43,8 +51,8 @@ function App() {
         db.incomes.toArray(),
         db.savings.toArray(),
         db.weeklyBudgets.toArray(),
-      ],
-    );
+        db.recurringInstances.toArray(),
+      ]);
     setSettings(set);
     setCategories(cats);
     setFreeExpenses(free);
@@ -53,6 +61,7 @@ function App() {
     setIncomes(inc);
     setSavings(sav);
     setWeeklyBudgets(weekBud);
+    setRecurringInstances(recInst);
   };
 
   const year = currentDate.getFullYear();
@@ -120,33 +129,157 @@ function App() {
   const getEventsForDay = (day) => {
     const events = [];
     const dateStr = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    const yearMonth = formatYearMonth(year, month);
 
+    // Fixed expenses - check recurring vs one-time
     fixedExpenses
-      .filter((e) => e.dayOfMonth === day && e.active !== false)
+      .filter((e) => {
+        if (e.active === false) return false;
+
+        if (e.isRecurring) {
+          // Check if has instance for this month
+          const instance = recurringInstances.find(
+            (i) =>
+              i.parentId === e.id &&
+              i.parentType === "fixedExpense" &&
+              i.yearMonth === yearMonth,
+          );
+
+          if (instance) {
+            // If assigned, show on assigned date
+            if (instance.status === "assigned" && instance.assignedDate) {
+              return instance.assignedDate === dateStr;
+            }
+            // If skipped or pending with no date, don't show
+            return false;
+          }
+
+          // No instance yet - if fixed day, show on adjusted day
+          if (e.dateType === "fixed" && e.dayOfMonth) {
+            const adjustedDay = getAdjustedDay(e.dayOfMonth, year, month);
+            return adjustedDay === day;
+          }
+
+          return false;
+        } else {
+          // One-time fixed expense
+          return e.date === dateStr;
+        }
+      })
       .forEach((e) => {
-        events.push({ type: "fixed", ...e });
+        const instance = recurringInstances.find(
+          (i) =>
+            i.parentId === e.id &&
+            i.parentType === "fixedExpense" &&
+            i.yearMonth === yearMonth,
+        );
+        events.push({
+          type: "fixed",
+          ...e,
+          amount: instance?.actualAmount ?? e.amount,
+        });
       });
+
+    // Forecasts
     forecasts
       .filter((f) => f.date === dateStr)
       .forEach((f) => {
         events.push({ type: "forecast", ...f });
       });
+
+    // Free expenses
     freeExpenses
       .filter((e) => e.date === dateStr)
       .forEach((e) => {
         events.push({ type: "free", ...e });
       });
+
+    // Incomes - check recurring vs one-time
     incomes
-      .filter((i) =>
-        i.isRecurring ? i.dayOfMonth === day : i.date === dateStr,
-      )
+      .filter((i) => {
+        if (i.isRecurring) {
+          const instance = recurringInstances.find(
+            (inst) =>
+              inst.parentId === i.id &&
+              inst.parentType === "income" &&
+              inst.yearMonth === yearMonth,
+          );
+
+          if (instance) {
+            if (instance.status === "assigned" && instance.assignedDate) {
+              return instance.assignedDate === dateStr;
+            }
+            return false;
+          }
+
+          // No instance yet - if fixed day, show on adjusted day
+          if (i.dateType === "fixed" && i.dayOfMonth) {
+            const adjustedDay = getAdjustedDay(i.dayOfMonth, year, month);
+            return adjustedDay === day;
+          }
+
+          return false;
+        } else {
+          // One-time income
+          return i.date === dateStr;
+        }
+      })
       .forEach((i) => {
-        events.push({ type: "income", ...i });
+        const instance = recurringInstances.find(
+          (inst) =>
+            inst.parentId === i.id &&
+            inst.parentType === "income" &&
+            inst.yearMonth === yearMonth,
+        );
+        events.push({
+          type: "income",
+          ...i,
+          amount: instance?.actualAmount ?? i.amount,
+        });
       });
+
+    // Savings - check recurring vs one-time
     savings
-      .filter((s) => s.date === dateStr)
+      .filter((s) => {
+        if (s.isRecurring) {
+          const instance = recurringInstances.find(
+            (inst) =>
+              inst.parentId === s.id &&
+              inst.parentType === "savings" &&
+              inst.yearMonth === yearMonth,
+          );
+
+          if (instance) {
+            if (instance.status === "assigned" && instance.assignedDate) {
+              return instance.assignedDate === dateStr;
+            }
+            return false;
+          }
+
+          // No instance yet - if fixed day, show on adjusted day
+          if (s.dateType === "fixed" && s.dayOfMonth) {
+            const adjustedDay = getAdjustedDay(s.dayOfMonth, year, month);
+            return adjustedDay === day;
+          }
+
+          return false;
+        } else {
+          // One-time savings
+          return s.date === dateStr;
+        }
+      })
       .forEach((s) => {
-        events.push({ type: "savings", ...s });
+        const instance = recurringInstances.find(
+          (inst) =>
+            inst.parentId === s.id &&
+            inst.parentType === "savings" &&
+            inst.yearMonth === yearMonth,
+        );
+        events.push({
+          type: "savings",
+          ...s,
+          amount: instance?.actualAmount ?? s.amount,
+        });
       });
 
     return events;
@@ -367,6 +500,17 @@ function App() {
   };
 
   const dashboard = calculateDashboard();
+
+  // Calculate recurring items for current month
+  const recurringItems = getRecurringItemsForMonth(
+    fixedExpenses,
+    incomes,
+    savings,
+    recurringInstances,
+    year,
+    month,
+  );
+  const pendingCount = getPendingAssignmentsCount(recurringItems);
 
   const handleDayClick = (day) => {
     setSelectedDay(day);
@@ -608,6 +752,7 @@ function App() {
       <InputDashboard
         data={dashboard}
         onOpenModal={(type) => setModal({ type })}
+        pendingCount={pendingCount}
       />
 
       {/* Day Actions Modal */}
@@ -637,6 +782,7 @@ function App() {
           year={year}
           month={month}
           onSave={closeModal}
+          onCategoriesChanged={loadAllData}
         />
       </Modal>
 
@@ -645,7 +791,11 @@ function App() {
         onClose={closeModal}
         title="Add Fixed Expense"
       >
-        <FixedExpenseForm categories={categories} onSave={closeModal} />
+        <FixedExpenseForm
+          categories={categories}
+          onSave={closeModal}
+          onCategoriesChanged={loadAllData}
+        />
       </Modal>
 
       <Modal
@@ -659,6 +809,7 @@ function App() {
           year={year}
           month={month}
           onSave={closeModal}
+          onCategoriesChanged={loadAllData}
         />
       </Modal>
 
@@ -667,7 +818,11 @@ function App() {
         onClose={closeModal}
         title="Add Income"
       >
-        <IncomeForm onSave={closeModal} />
+        <IncomeForm
+          categories={categories}
+          onSave={closeModal}
+          onCategoriesChanged={loadAllData}
+        />
       </Modal>
 
       <Modal
@@ -676,10 +831,12 @@ function App() {
         title="Add Savings"
       >
         <SavingsForm
+          categories={categories}
           defaultDay={modal.data?.day}
           year={year}
           month={month}
           onSave={closeModal}
+          onCategoriesChanged={loadAllData}
         />
       </Modal>
 
@@ -711,6 +868,7 @@ function App() {
           month={month}
           onSave={closeModal}
           editData={modal.data}
+          onCategoriesChanged={loadAllData}
         />
       </Modal>
 
@@ -723,6 +881,7 @@ function App() {
           categories={categories}
           onSave={closeModal}
           editData={modal.data}
+          onCategoriesChanged={loadAllData}
         />
       </Modal>
 
@@ -737,6 +896,7 @@ function App() {
           month={month}
           onSave={closeModal}
           editData={modal.data}
+          onCategoriesChanged={loadAllData}
         />
       </Modal>
 
@@ -745,7 +905,12 @@ function App() {
         onClose={closeModal}
         title="Edit Income"
       >
-        <IncomeForm onSave={closeModal} editData={modal.data} />
+        <IncomeForm
+          categories={categories}
+          onSave={closeModal}
+          editData={modal.data}
+          onCategoriesChanged={loadAllData}
+        />
       </Modal>
 
       <Modal
@@ -754,10 +919,12 @@ function App() {
         title="Edit Savings"
       >
         <SavingsForm
+          categories={categories}
           year={year}
           month={month}
           onSave={closeModal}
           editData={modal.data}
+          onCategoriesChanged={loadAllData}
         />
       </Modal>
 
@@ -774,6 +941,16 @@ function App() {
           onSave={closeModal}
         />
       </Modal>
+
+      {/* Pending Assignments Modal */}
+      <PendingAssignmentsModal
+        isOpen={modal.type === "pendingAssignments"}
+        onClose={closeModal}
+        recurringItems={recurringItems}
+        year={year}
+        month={month}
+        onUpdate={loadAllData}
+      />
     </div>
   );
 }
