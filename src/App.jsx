@@ -42,6 +42,7 @@ function App() {
 
   useEffect(() => {
     loadAllData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentDate]);
 
   useEffect(() => {
@@ -62,6 +63,7 @@ function App() {
       }
     };
     autoComplete();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fixedExpenses, incomes, savings, recurringInstances, year, month]);
 
   const loadAllData = async () => {
@@ -77,6 +79,7 @@ function App() {
         db.weeklyBudgets.toArray(),
         db.recurringInstances.toArray(),
       ]);
+
     setSettings(set);
     setCategories(cats);
     setFreeExpenses(free);
@@ -88,14 +91,14 @@ function App() {
     setRecurringInstances(recInst);
   };
 
-  // Get week start day from settings (0=Sunday, 1=Monday, etc.)
-  const weekStartDay = settings?.weekStartDay ?? 1; // Default to Monday
+  // Week start day (0=Sunday, 1=Monday, etc.)
+  const weekStartDay = settings?.weekStartDay ?? 1;
 
-  // Calculate first day of month adjusted for week start day
+  // Calendar layout helpers
   const rawFirstDay = new Date(year, month, 1).getDay(); // 0=Sunday
   const firstDayOfMonth = (rawFirstDay - weekStartDay + 7) % 7;
-
   const daysInMonth = new Date(year, month + 1, 0).getDate();
+
   const monthNames = [
     "January",
     "February",
@@ -114,13 +117,17 @@ function App() {
   const prevMonth = () => setCurrentDate(new Date(year, month - 1, 1));
   const nextMonth = () => setCurrentDate(new Date(year, month + 1, 1));
 
-  // Helper to check if a date is in current month
+  // ---------------------------
+  // Date helpers
+  // ---------------------------
+  const toDateStr = (y, m, d) =>
+    `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+
   const isInCurrentMonth = (dateStr) => {
     const d = new Date(dateStr);
     return d.getMonth() === month && d.getFullYear() === year;
   };
 
-  // Helper to check if a date has passed (up to today)
   const hasDatePassed = (dateStr) => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -129,71 +136,84 @@ function App() {
     return d <= today;
   };
 
-  // Helper to check if a day of month has passed
   const hasDayPassed = (dayOfMonth) => {
     const today = new Date();
     const currentMonth = today.getMonth();
     const currentYear = today.getFullYear();
 
-    // Only count as passed if we're in the current actual month
+    // If viewing the real current month, compare day numbers
     if (month === currentMonth && year === currentYear) {
       return dayOfMonth <= today.getDate();
     }
-    // If viewing past month, all days have passed
+    // If viewing a past month, everything is considered passed
     if (year < currentYear || (year === currentYear && month < currentMonth)) {
       return true;
     }
-    // If viewing future month, no days have passed
+    // Future month => nothing passed
     return false;
   };
 
+  // ---------------------------
+  // Recurring instance helpers
+  // ---------------------------
+  const getInstanceFor = (parentType, parentId, yearMonth) =>
+    recurringInstances.find(
+      (inst) =>
+        inst.parentType === parentType &&
+        inst.parentId === parentId &&
+        inst.yearMonth === yearMonth,
+    );
+
+  const getEffectiveOccurrenceDate = (template, instance, y, m) => {
+    // Assigned date is the truth
+    if (instance?.status === "assigned" && instance.assignedDate) {
+      return instance.assignedDate;
+    }
+    // Otherwise predict from fixed day
+    if (template?.dateType === "fixed" && template?.dayOfMonth) {
+      const adjusted = getAdjustedDay(template.dayOfMonth, y, m);
+      return toDateStr(y, m, adjusted);
+    }
+    // One-time fallback
+    return template?.date ?? null;
+  };
+
+  // ---------------------------
+  // Events per day (calendar display)
+  // ---------------------------
   const getEventsForDay = (day) => {
     const events = [];
-    const dateStr = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    const dateStr = toDateStr(year, month, day);
     const yearMonth = formatYearMonth(year, month);
 
-    // Fixed expenses - check recurring vs one-time
+    // Fixed expenses
     fixedExpenses
       .filter((e) => {
         if (e.active === false) return false;
 
         if (e.isRecurring) {
-          // Check if has instance for this month
-          const instance = recurringInstances.find(
-            (i) =>
-              i.parentId === e.id &&
-              i.parentType === "fixedExpense" &&
-              i.yearMonth === yearMonth,
-          );
+          const instance = getInstanceFor("fixedExpense", e.id, yearMonth);
 
           if (instance) {
-            // If assigned, show on assigned date
             if (instance.status === "assigned" && instance.assignedDate) {
               return instance.assignedDate === dateStr;
             }
-            // If skipped or pending with no date, don't show
+            // skipped/pending => not shown on calendar
             return false;
           }
 
-          // No instance yet - if fixed day, show on adjusted day
           if (e.dateType === "fixed" && e.dayOfMonth) {
             const adjustedDay = getAdjustedDay(e.dayOfMonth, year, month);
             return adjustedDay === day;
           }
 
           return false;
-        } else {
-          // One-time fixed expense
-          return e.date === dateStr;
         }
+
+        return e.date === dateStr;
       })
       .forEach((e) => {
-        const instance = recurringInstances.find(
-          (i) =>
-            i.parentId === e.id &&
-            i.parentType === "fixedExpense" &&
-            i.yearMonth === yearMonth,
-        );
+        const instance = getInstanceFor("fixedExpense", e.id, yearMonth);
         events.push({
           type: "fixed",
           ...e,
@@ -204,27 +224,18 @@ function App() {
     // Forecasts
     forecasts
       .filter((f) => f.date === dateStr)
-      .forEach((f) => {
-        events.push({ type: "forecast", ...f });
-      });
+      .forEach((f) => events.push({ type: "forecast", ...f }));
 
     // Free expenses
     freeExpenses
       .filter((e) => e.date === dateStr)
-      .forEach((e) => {
-        events.push({ type: "free", ...e });
-      });
+      .forEach((e) => events.push({ type: "free", ...e }));
 
-    // Incomes - check recurring vs one-time
+    // Incomes
     incomes
       .filter((i) => {
         if (i.isRecurring) {
-          const instance = recurringInstances.find(
-            (inst) =>
-              inst.parentId === i.id &&
-              inst.parentType === "income" &&
-              inst.yearMonth === yearMonth,
-          );
+          const instance = getInstanceFor("income", i.id, yearMonth);
 
           if (instance) {
             if (instance.status === "assigned" && instance.assignedDate) {
@@ -233,25 +244,18 @@ function App() {
             return false;
           }
 
-          // No instance yet - if fixed day, show on adjusted day
           if (i.dateType === "fixed" && i.dayOfMonth) {
             const adjustedDay = getAdjustedDay(i.dayOfMonth, year, month);
             return adjustedDay === day;
           }
 
           return false;
-        } else {
-          // One-time income
-          return i.date === dateStr;
         }
+
+        return i.date === dateStr;
       })
       .forEach((i) => {
-        const instance = recurringInstances.find(
-          (inst) =>
-            inst.parentId === i.id &&
-            inst.parentType === "income" &&
-            inst.yearMonth === yearMonth,
-        );
+        const instance = getInstanceFor("income", i.id, yearMonth);
         events.push({
           type: "income",
           ...i,
@@ -259,16 +263,11 @@ function App() {
         });
       });
 
-    // Savings - check recurring vs one-time
+    // Savings
     savings
       .filter((s) => {
         if (s.isRecurring) {
-          const instance = recurringInstances.find(
-            (inst) =>
-              inst.parentId === s.id &&
-              inst.parentType === "savings" &&
-              inst.yearMonth === yearMonth,
-          );
+          const instance = getInstanceFor("savings", s.id, yearMonth);
 
           if (instance) {
             if (instance.status === "assigned" && instance.assignedDate) {
@@ -277,25 +276,18 @@ function App() {
             return false;
           }
 
-          // No instance yet - if fixed day, show on adjusted day
           if (s.dateType === "fixed" && s.dayOfMonth) {
             const adjustedDay = getAdjustedDay(s.dayOfMonth, year, month);
             return adjustedDay === day;
           }
 
           return false;
-        } else {
-          // One-time savings
-          return s.date === dateStr;
         }
+
+        return s.date === dateStr;
       })
       .forEach((s) => {
-        const instance = recurringInstances.find(
-          (inst) =>
-            inst.parentId === s.id &&
-            inst.parentType === "savings" &&
-            inst.yearMonth === yearMonth,
-        );
+        const instance = getInstanceFor("savings", s.id, yearMonth);
         events.push({
           type: "savings",
           ...s,
@@ -306,7 +298,9 @@ function App() {
     return events;
   };
 
-  // Helper to get the start of the week for a given date
+  // ---------------------------
+  // Week + budget helpers
+  // ---------------------------
   const getWeekStart = (date, weekStartDay = 1) => {
     const d = new Date(date);
     d.setHours(0, 0, 0, 0);
@@ -316,26 +310,13 @@ function App() {
     return d;
   };
 
-  // Helper to format date as YYYY-MM-DD
   const formatDateStr = (date) => {
-    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(
+      2,
+      "0",
+    )}-${String(date.getDate()).padStart(2, "0")}`;
   };
 
-  // Helper to get spent amount for a specific week
-  const getWeekSpent = (weekStartDate) => {
-    const weekEnd = new Date(weekStartDate);
-    weekEnd.setDate(weekEnd.getDate() + 6);
-    weekEnd.setHours(23, 59, 59, 999);
-
-    return freeExpenses
-      .filter((e) => {
-        const d = new Date(e.date);
-        return d >= weekStartDate && d <= weekEnd;
-      })
-      .reduce((sum, e) => sum + e.amount, 0);
-  };
-
-  // Helper to get budget for a specific week
   const getWeekBudget = (weekStartDate) => {
     const weekStartStr = formatDateStr(weekStartDate);
     const customBudget = weeklyBudgets.find(
@@ -344,105 +325,174 @@ function App() {
     return customBudget?.amount ?? (settings?.weeklyBudget || 0);
   };
 
-  const calculateDashboard = () => {
-    const now = new Date();
-    const currentMonth = now.getMonth();
-    const currentYear = now.getFullYear();
-    const todayDate = now.getDate();
+  // Free expenses + forecasts with deductFrom="weekly"
+  const getWeekSpent = (weekStartDate) => {
+    const weekEnd = new Date(weekStartDate);
+    weekEnd.setDate(weekEnd.getDate() + 6);
+    weekEnd.setHours(23, 59, 59, 999);
 
-    // Filter for current month
+    const freeSpent = freeExpenses
+      .filter((e) => {
+        const d = new Date(e.date);
+        return d >= weekStartDate && d <= weekEnd;
+      })
+      .reduce((sum, e) => sum + e.amount, 0);
+
+    const forecastSpent = forecasts
+      .filter((f) => {
+        if (f.deductFrom !== "weekly") return false;
+        const d = new Date(f.date);
+        return d >= weekStartDate && d <= weekEnd;
+      })
+      .reduce((sum, f) => sum + f.amount, 0);
+
+    return freeSpent + forecastSpent;
+  };
+
+  // ---------------------------
+  // Dashboard calculation
+  // ---------------------------
+  const calculateDashboard = () => {
+    const yearMonth = formatYearMonth(year, month);
+
     const thisMonthFree = freeExpenses.filter((e) => isInCurrentMonth(e.date));
     const thisMonthForecasts = forecasts.filter((f) =>
       isInCurrentMonth(f.date),
     );
-    const thisMonthSavings = savings.filter((s) => isInCurrentMonth(s.date));
+    const thisMonthSavings = savings.filter((s) =>
+      s.date ? isInCurrentMonth(s.date) : true,
+    );
 
-    // --- CURRENT BALANCE (what has actually happened up to today) ---
-    // Income received (recurring that has passed + one-time that has passed)
+    // --- CURRENT BALANCE (up to today) ---
     const incomeReceived = incomes.reduce((sum, i) => {
       if (i.isRecurring) {
-        if (hasDayPassed(i.dayOfMonth)) return sum + i.amount;
-      } else {
-        if (hasDatePassed(i.date) && isInCurrentMonth(i.date))
-          return sum + i.amount;
+        const inst = getInstanceFor("income", i.id, yearMonth);
+
+        // If there is an instance, only count it if assigned and passed
+        if (inst) {
+          if (inst.status !== "assigned") return sum;
+          const occ = getEffectiveOccurrenceDate(i, inst, year, month);
+          if (occ && hasDatePassed(occ)) {
+            return sum + (inst.actualAmount ?? i.amount);
+          }
+          return sum;
+        }
+
+        // No instance yet => predict by fixed day
+        const occ = getEffectiveOccurrenceDate(i, null, year, month);
+        if (occ && hasDatePassed(occ)) return sum + i.amount;
+        return sum;
+      }
+
+      // One-time income
+      if (i.date && isInCurrentMonth(i.date) && hasDatePassed(i.date)) {
+        return sum + i.amount;
       }
       return sum;
     }, 0);
 
-    // Fixed expenses paid (day has passed)
-    const fixedPaid = fixedExpenses
-      .filter((e) => e.active !== false && hasDayPassed(e.dayOfMonth))
-      .reduce((sum, e) => sum + e.amount, 0);
+    const fixedPaid = fixedExpenses.reduce((sum, e) => {
+      if (e.active === false) return sum;
 
-    // Free expenses made (date has passed)
+      if (e.isRecurring) {
+        const inst = getInstanceFor("fixedExpense", e.id, yearMonth);
+
+        if (inst) {
+          if (inst.status !== "assigned") return sum;
+          const occ = getEffectiveOccurrenceDate(e, inst, year, month);
+          if (occ && hasDatePassed(occ)) {
+            return sum + (inst.actualAmount ?? e.amount);
+          }
+          return sum;
+        }
+
+        const occ = getEffectiveOccurrenceDate(e, null, year, month);
+        if (occ && hasDatePassed(occ)) return sum + e.amount;
+        return sum;
+      }
+
+      // One-time fixed expense
+      if (e.date && isInCurrentMonth(e.date) && hasDatePassed(e.date)) {
+        return sum + e.amount;
+      }
+
+      // Legacy fallback (if you still have fixed items with just dayOfMonth)
+      if (!e.date && e.dayOfMonth && hasDayPassed(e.dayOfMonth)) {
+        return sum + e.amount;
+      }
+
+      return sum;
+    }, 0);
+
     const freePaid = thisMonthFree
       .filter((e) => hasDatePassed(e.date))
       .reduce((sum, e) => sum + e.amount, 0);
 
-    // Forecasts completed
     const forecastsPaid = thisMonthForecasts
       .filter((f) => f.status === "completed" || hasDatePassed(f.date))
       .reduce((sum, f) => sum + f.amount, 0);
 
-    // Savings made (date has passed)
-    const savingsMade = thisMonthSavings
-      .filter((s) => hasDatePassed(s.date))
-      .reduce((sum, s) => sum + s.amount, 0);
+    const savingsMade = savings.reduce((sum, s) => {
+      if (s.isRecurring) {
+        const inst = getInstanceFor("savings", s.id, yearMonth);
+
+        if (inst) {
+          if (inst.status !== "assigned") return sum;
+          const occ = getEffectiveOccurrenceDate(s, inst, year, month);
+          if (occ && hasDatePassed(occ)) {
+            return sum + (inst.actualAmount ?? s.amount);
+          }
+          return sum;
+        }
+
+        const occ = getEffectiveOccurrenceDate(s, null, year, month);
+        if (occ && hasDatePassed(occ)) return sum + s.amount;
+        return sum;
+      }
+
+      if (s.date && isInCurrentMonth(s.date) && hasDatePassed(s.date)) {
+        return sum + s.amount;
+      }
+      return sum;
+    }, 0);
 
     const currentBalance =
       incomeReceived - savingsMade - fixedPaid - freePaid - forecastsPaid;
 
-    // --- MONTH-END FORECAST (estimation for end of month) ---
-    // Total expected income
+    // --- MONTH-END FORECAST (end-of-month estimation for the VIEWED month) ---
     const totalIncome = incomes.reduce((sum, i) => {
       if (i.isRecurring) return sum + i.amount;
-      if (isInCurrentMonth(i.date)) return sum + i.amount;
+      if (i.date && isInCurrentMonth(i.date)) return sum + i.amount;
       return sum;
     }, 0);
 
-    // Total fixed expenses
     const totalFixed = fixedExpenses
       .filter((e) => e.active !== false)
       .reduce((sum, e) => sum + e.amount, 0);
 
-    // Total forecasts (pending)
     const totalForecasts = thisMonthForecasts
       .filter((f) => f.status === "pending")
       .reduce((sum, f) => sum + f.amount, 0);
 
-    // Total savings this month
-    const totalSavings = thisMonthSavings.reduce((sum, s) => sum + s.amount, 0);
+    const totalSavings = thisMonthSavings.reduce(
+      (sum, s) => sum + (s.amount || 0),
+      0,
+    );
 
-    // --- WEEKLY BUDGETS FOR THIS MONTH ---
-    // A week belongs to the month where it STARTS
-    // Calculate total weekly budgets + any overspending
-    const getWeeksInMonth = (year, month, weekStartDay) => {
+    // --- Weekly budgets for this viewed month ---
+    // Week belongs to the month where it STARTS (same rule you wrote)
+    const getWeeksInViewedMonth = (y, m, weekStartDay) => {
       const weeks = [];
-      const firstOfMonth = new Date(year, month, 1);
-      const lastOfMonth = new Date(year, month + 1, 0);
+      const firstOfMonth = new Date(y, m, 1);
 
-      // Find the first week that starts in this month
       let weekStart = getWeekStart(firstOfMonth, weekStartDay);
 
-      // If the week started in previous month, move to next week
-      if (
-        weekStart.getMonth() < month ||
-        (weekStart.getMonth() === 11 &&
-          month === 0 &&
-          weekStart.getFullYear() < year)
-      ) {
-        weekStart.setDate(weekStart.getDate() + 7);
-      }
-      // Handle year boundary
-      if (weekStart.getFullYear() < year) {
+      // If that week start is in previous month, move to next week
+      if (weekStart.getMonth() !== m || weekStart.getFullYear() !== y) {
         weekStart.setDate(weekStart.getDate() + 7);
       }
 
-      // Collect all weeks that START in this month
-      while (
-        weekStart.getMonth() === month &&
-        weekStart.getFullYear() === year
-      ) {
+      while (weekStart.getMonth() === m && weekStart.getFullYear() === y) {
         weeks.push(new Date(weekStart));
         weekStart.setDate(weekStart.getDate() + 7);
       }
@@ -450,15 +500,11 @@ function App() {
       return weeks;
     };
 
-    const weeksThisMonth = getWeeksInMonth(
-      currentYear,
-      currentMonth,
-      settings?.weekStartDay ?? 1,
-    );
+    const weeksThisMonth = getWeeksInViewedMonth(year, month, weekStartDay);
 
     let totalWeeklyBudgets = 0;
-    let totalOverspending = 0;
     let totalWeeklySpent = 0;
+    let totalOverspending = 0;
 
     weeksThisMonth.forEach((weekStartDate) => {
       const weekBudget = getWeekBudget(weekStartDate);
@@ -467,7 +513,6 @@ function App() {
       totalWeeklyBudgets += weekBudget;
       totalWeeklySpent += weekSpent;
 
-      // If overspent, add the excess
       if (weekSpent > weekBudget) {
         totalOverspending += weekSpent - weekBudget;
       }
@@ -483,20 +528,11 @@ function App() {
       totalWeeklyBudgets -
       totalOverspending;
 
-    // Weekly budget calculation - based on current running week
-    const currentWeekStart = getWeekStart(now, settings?.weekStartDay ?? 1);
-    const currentWeekEnd = new Date(currentWeekStart);
-    currentWeekEnd.setDate(currentWeekEnd.getDate() + 6);
-    currentWeekEnd.setHours(23, 59, 59, 999);
-
-    const weeklySpent = freeExpenses
-      .filter((e) => {
-        const d = new Date(e.date);
-        return d >= currentWeekStart && d <= currentWeekEnd;
-      })
-      .reduce((sum, e) => sum + e.amount, 0);
-
-    // Get custom budget for current week or use default
+    // --- Current week budget (relative to today) ---
+    // If you're viewing another month, this is still "today's week", which is fine for the top dashboard
+    const now = new Date();
+    const currentWeekStart = getWeekStart(now, weekStartDay);
+    const weeklySpent = getWeekSpent(currentWeekStart);
     const weekStartStr = formatDateStr(currentWeekStart);
     const customBudget = weeklyBudgets.find(
       (wb) => wb.weekStart === weekStartStr,
@@ -522,7 +558,7 @@ function App() {
 
   const dashboard = calculateDashboard();
 
-  // Calculate recurring items for current month
+  // Recurring items for the month (PendingAssignmentsModal)
   const recurringItems = getRecurringItemsForMonth(
     fixedExpenses,
     incomes,
@@ -533,6 +569,9 @@ function App() {
   );
   const pendingCount = getPendingAssignmentsCount(recurringItems);
 
+  // ---------------------------
+  // UI handlers
+  // ---------------------------
   const handleDayClick = (day) => {
     setSelectedDay(day);
     setModal({ type: "dayActions", data: { day } });
@@ -544,8 +583,8 @@ function App() {
     loadAllData();
   };
 
-  // Delete handlers
   const handleDelete = async (type, id) => {
+    // eslint-disable-next-line no-restricted-globals
     if (!confirm("Are you sure you want to delete this?")) return;
 
     switch (type) {
@@ -564,11 +603,12 @@ function App() {
       case "savings":
         await db.savings.delete(id);
         break;
+      default:
+        break;
     }
     loadAllData();
   };
 
-  // Edit handler - opens edit modal
   const handleEdit = (type, item) => {
     setModal({
       type: `edit${type.charAt(0).toUpperCase() + type.slice(1)}`,
@@ -576,12 +616,11 @@ function App() {
     });
   };
 
+  // Calendar cells
   const calendarDays = [];
   for (let i = 0; i < firstDayOfMonth; i++) calendarDays.push(null);
   for (let day = 1; day <= daysInMonth; day++) calendarDays.push(day);
-  while (calendarDays.length % 7 !== 0) {
-    calendarDays.push(null);
-  }
+  while (calendarDays.length % 7 !== 0) calendarDays.push(null);
 
   const eventColors = {
     fixed: "bg-purple-900/40 text-purple-200",
@@ -591,7 +630,6 @@ function App() {
     savings: "bg-emerald-900/40 text-emerald-200",
   };
 
-  // Get day names starting from weekStartDay
   const getDayNames = () => {
     const allDays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
     const result = [];
@@ -607,7 +645,6 @@ function App() {
         Whizzfin
       </h1>
 
-      {/* Calendar Navigation */}
       <CalendarNavigation
         month={month}
         year={year}
@@ -616,10 +653,8 @@ function App() {
         onNextMonth={nextMonth}
       />
 
-      {/* Main Dashboard */}
       <MainDashboard data={dashboard} />
 
-      {/* Calendar with Budget sidebar */}
       <div className="flex mb-4 gap-2">
         {/* Calendar Grid */}
         <div className="flex-1 border border-border rounded-xl overflow-hidden">
@@ -645,6 +680,7 @@ function App() {
                 })}
               </tr>
             </thead>
+
             <tbody>
               {Array.from({ length: Math.ceil(calendarDays.length / 7) }).map(
                 (_, wi) => {
@@ -660,6 +696,7 @@ function App() {
                           new Date().getDate() === day &&
                           new Date().getMonth() === month &&
                           new Date().getFullYear() === year;
+
                         const actualDay = (weekStartDay + di) % 7;
                         const isWeekend = actualDay === 0 || actualDay === 6;
 
@@ -667,7 +704,7 @@ function App() {
                           <td
                             key={di}
                             className={`
-                              border-b border-r border-border p-1 align-top h-24  text-xs transition-colors
+                              border-b border-border p-1 align-top h-24 text-xs transition-colors
                               last:border-r-0
                               ${!day ? "bg-surface/50" : "cursor-pointer hover:bg-blue-3"}
                               ${isToday ? "bg-blue-2" : isWeekend && day ? "bg-red-900/10" : ""}
@@ -678,10 +715,11 @@ function App() {
                             {day ? (
                               <div className="flex flex-col h-full">
                                 <div
-                                  className={`font-bold nr-300 mb-1 ${isToday ? "text-blue-8" : ""}`}
+                                  className={`font-bold nr-300 mb-1 text-center ${isToday ? "text-blue-8" : ""}`}
                                 >
                                   {day}
                                 </div>
+
                                 <div className="gap-1 overflow-hidden">
                                   {getEventsForDay(day)
                                     .slice(0, 3)
@@ -697,6 +735,7 @@ function App() {
                                         {e.amount}€
                                       </div>
                                     ))}
+
                                   {getEventsForDay(day).length > 3 && (
                                     <div className="text-gray-400 text-[10px] mt-1">
                                       +{getEventsForDay(day).length - 3} more
@@ -719,7 +758,7 @@ function App() {
         </div>
 
         {/* Budget sidebar */}
-        <div className="flex flex-col w-16">
+        <div className="flex flex-col ">
           <div className="h-[39px] flex items-center justify-center"></div>
           {Array.from({ length: Math.ceil(calendarDays.length / 7) }).map(
             (_, wi) => {
@@ -731,6 +770,7 @@ function App() {
                     weekStartDay,
                   )
                 : null;
+
               const weekSpent = weekStartDate ? getWeekSpent(weekStartDate) : 0;
               const weekBudget = weekStartDate
                 ? getWeekBudget(weekStartDate)
@@ -754,7 +794,7 @@ function App() {
                 >
                   {weekStartDate && (
                     <div
-                      className={` nr-500 text-lg font-bold ${weekRemaining < 0 ? "text-red-400" : "text-text-muted"}`}
+                      className={`nr-500 text-lg font-bold ${weekRemaining < 0 ? "text-red-400" : "text-text-muted"}`}
                     >
                       {weekRemaining.toFixed(0)}€
                       <div className="text-text-muted nr-400 font-normal text-[10px]">
@@ -769,14 +809,12 @@ function App() {
         </div>
       </div>
 
-      {/* Input Dashboard */}
       <InputDashboard
         data={dashboard}
         onOpenModal={(type) => setModal({ type })}
         pendingCount={pendingCount}
       />
 
-      {/* Day Actions Modal */}
       <DayActionsModal
         isOpen={modal.type === "dayActions"}
         onClose={closeModal}
@@ -964,7 +1002,6 @@ function App() {
       </Modal>
 
       {/* Pending Assignments Modal */}
-      {/* Pending Assignments Modal */}
       <PendingAssignmentsModal
         isOpen={modal.type === "pendingAssignments"}
         onClose={closeModal}
@@ -973,7 +1010,6 @@ function App() {
         month={month}
         onUpdate={loadAllData}
         onEditTemplate={(item) => {
-          // Open the appropriate edit form based on parentType
           const editType = {
             income: "editIncome",
             fixedExpense: "editFixed",
@@ -987,27 +1023,23 @@ function App() {
   );
 }
 
-// FORM COMPONENTS
-
+// ------------------------------------
+// WeeklyBudgetForm
+// ------------------------------------
 function WeeklyBudgetForm({ weekStart, currentBudget, defaultBudget, onSave }) {
-  const [amount, setAmount] = useState(currentBudget || defaultBudget);
+  const [amount, setAmount] = useState(currentBudget ?? defaultBudget);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    // Check if custom budget exists for this week
     const existing = await db.weeklyBudgets
       .where("weekStart")
       .equals(weekStart)
       .first();
 
     if (amount === defaultBudget) {
-      // If set to default, remove custom budget
-      if (existing) {
-        await db.weeklyBudgets.delete(existing.id);
-      }
+      if (existing) await db.weeklyBudgets.delete(existing.id);
     } else {
-      // Save custom budget
       if (existing) {
         await db.weeklyBudgets.update(existing.id, { amount });
       } else {

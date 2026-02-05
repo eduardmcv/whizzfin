@@ -7,7 +7,7 @@ function Modal({ isOpen, onClose, title, children }) {
       onClick={onClose}
     >
       <div
-        className="bg-surface p-5 rounded-lg min-w-[400px] max-w-[90%] max-h-[90vh] overflow-auto border border-border"
+        className="bg-surface p-6 rounded-lg min-w-[400px] max-w-[90%] max-h-[90vh] overflow-auto border border-border"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex justify-between items-center mb-6">

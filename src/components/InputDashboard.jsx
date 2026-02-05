@@ -1,48 +1,6 @@
 function InputDashboard({ data, onOpenModal, pendingCount }) {
   return (
     <div className="flex flex-col gap-4 mb-8">
-      {/* Pending Assignments Button */}
-      <button
-        onClick={() => onOpenModal("pendingAssignments")}
-        className="cursor-pointer group relative overflow-hidden p-4 bg-surface rounded-lg text-center shadow-sm w-full"
-      >
-        <div className="flex justify-between items-center">
-          <div className="text-left">
-            <div className="text-xs text-text-muted">Recurring Items</div>
-            <div className="text-xl font-semibold text-text">
-              Pending Assignments
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <div className="text-2xl font-bold text-text nr-500">
-              {pendingCount.assigned}/{pendingCount.total}
-            </div>
-            <div
-              className="p-2 bg-gray-4 rounded-full 
-              transition-all duration-300 ease-in-out
-              group-hover:bg-gray-5"
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="20"
-                height="20"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="white"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path stroke="none" d="M0 0h24v24H0z" fill="none" />
-                <path d="M9 5h-2a2 2 0 0 0 -2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2 -2v-12a2 2 0 0 0 -2 -2h-2" />
-                <path d="M9 3m0 2a2 2 0 0 1 2 -2h2a2 2 0 0 1 2 2v0a2 2 0 0 1 -2 2h-2a2 2 0 0 1 -2 -2z" />
-                <path d="M9 12l2 2l4 -4" />
-              </svg>
-            </div>
-          </div>
-        </div>
-      </button>
-
       {/* Main grid */}
       <div className="grid grid-cols-6 md:grid-cols-6 gap-4">
         {/* Income - Blue */}
@@ -272,15 +230,38 @@ function InputDashboard({ data, onOpenModal, pendingCount }) {
           </div>
         </button>
 
-        {/* Current Balance - No button */}
-        <div className="p-4 bg-surface/50 rounded-lg text-center shadow-sm col-span-2">
-          <div className="text-xs text-text-muted">Current Balance</div>
-          <div
-            className={`nr-500 text-xl font-semibold ${data.currentBalance >= 0 ? "text-text" : "text-red-500"}`}
-          >
-            {data.currentBalance.toFixed(2)}€
+        {/* Settings - Gray */}
+        <button
+          onClick={() => onOpenModal("pendingAssignments")}
+          className="cursor-pointer group relative overflow-hidden p-4 bg-surface rounded-lg text-center shadow-sm col-span-2"
+        >
+          <div className="text-xs text-text-muted">
+            {pendingCount.assigned}/{pendingCount.total}
           </div>
-        </div>
+          <div className="text-xl font-semibold text-gray-11">Recurring</div>
+          <div
+            className="absolute -bottom-1.5 -right-1.5 p-2 bg-gray-4 rounded-4xl 
+            transition-all duration-300 ease-in-out
+            group-hover:bottom-0 group-hover:right-0"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="white"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+              <path d="M9 5h-2a2 2 0 0 0 -2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2 -2v-12a2 2 0 0 0 -2 -2h-2" />
+              <path d="M9 3m0 2a2 2 0 0 1 2 -2h2a2 2 0 0 1 2 2v0a2 2 0 0 1 -2 2h-2a2 2 0 0 1 -2 -2z" />
+              <path d="M9 12l2 2l4 -4" />
+            </svg>
+          </div>
+        </button>
       </div>
     </div>
   );
