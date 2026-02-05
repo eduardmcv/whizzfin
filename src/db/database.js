@@ -99,4 +99,18 @@ db.version(6)
     // Savings were not recurring before, so no migration needed
   });
 
+// Version 7 - weekly budget assignments for cross-month weeks
+db.version(7).stores({
+  settings: "++id",
+  categories: "++id, name, type",
+  freeExpenses: "++id, date, categoryId",
+  fixedExpenses: "++id, dayOfMonth, categoryId, isRecurring",
+  forecasts: "++id, date, categoryId",
+  incomes: "++id, date, dayOfMonth, categoryId, isRecurring",
+  savings: "++id, date, categoryId, isRecurring",
+  weeklyBudgets: "++id, weekStart",
+  weeklyBudgetAssignments: "++id, weekStart, assignedMonth",
+  recurringInstances: "++id, parentId, parentType, yearMonth, status",
+});
+
 export default db;

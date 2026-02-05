@@ -7,6 +7,7 @@ import InputDashboard from "./components/InputDashboard";
 import CalendarNavigation from "./components/CalendarNavigation";
 import DayActionsModal from "./components/DayActionsModal";
 import PendingAssignmentsModal from "./components/PendingAssignmentsModal";
+import WeekView from "./components/WeekView";
 import {
   getRecurringItemsForMonth,
   getPendingAssignmentsCount,
@@ -32,13 +33,53 @@ function App() {
   const [incomes, setIncomes] = useState([]);
   const [savings, setSavings] = useState([]);
   const [weeklyBudgets, setWeeklyBudgets] = useState([]);
+  const [weeklyBudgetAssignments, setWeeklyBudgetAssignments] = useState([]);
   const [currentDate, setCurrentDate] = useState(new Date());
+  const [currentWeekStart, setCurrentWeekStart] = useState(null); // For week view navigation
+  const [currentView, setCurrentView] = useState("calendar"); // "calendar" | "week"
   const [modal, setModal] = useState({ type: null, data: null });
   const [selectedDay, setSelectedDay] = useState(null);
   const [recurringInstances, setRecurringInstances] = useState([]);
 
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
+
+  // Initialize currentWeekStart when settings load
+  useEffect(() => {
+    if (settings && !currentWeekStart) {
+      const weekStartDay = settings.weekStartDay ?? 1;
+      const today = new Date();
+      const currentDay = today.getDay();
+      const diff = (currentDay - weekStartDay + 7) % 7;
+      const start = new Date(today);
+      start.setDate(today.getDate() - diff);
+      start.setHours(0, 0, 0, 0);
+      setCurrentWeekStart(start);
+    }
+  }, [settings, currentWeekStart]);
+
+  // Get effective year/month based on current view
+  const getEffectiveYearMonth = () => {
+    if (currentView === "week" && currentWeekStart) {
+      // For week view, use the month based on week assignment or week start
+      const weekStartStr = `${currentWeekStart.getFullYear()}-${String(currentWeekStart.getMonth() + 1).padStart(2, "0")}-${String(currentWeekStart.getDate()).padStart(2, "0")}`;
+      const assignment = weeklyBudgetAssignments.find(
+        (a) => a.weekStart === weekStartStr,
+      );
+
+      if (assignment) {
+        const [y, m] = assignment.assignedMonth.split("-").map(Number);
+        return { year: y, month: m - 1 };
+      }
+      return {
+        year: currentWeekStart.getFullYear(),
+        month: currentWeekStart.getMonth(),
+      };
+    }
+    return { year, month };
+  };
+
+  const effectiveYearMonth = getEffectiveYearMonth();
 
   useEffect(() => {
     loadAllData();
@@ -67,18 +108,29 @@ function App() {
   }, [fixedExpenses, incomes, savings, recurringInstances, year, month]);
 
   const loadAllData = async () => {
-    const [set, cats, free, fixed, fore, inc, sav, weekBud, recInst] =
-      await Promise.all([
-        db.settings.get(1),
-        db.categories.toArray(),
-        db.freeExpenses.toArray(),
-        db.fixedExpenses.toArray(),
-        db.forecasts.toArray(),
-        db.incomes.toArray(),
-        db.savings.toArray(),
-        db.weeklyBudgets.toArray(),
-        db.recurringInstances.toArray(),
-      ]);
+    const [
+      set,
+      cats,
+      free,
+      fixed,
+      fore,
+      inc,
+      sav,
+      weekBud,
+      weekAssign,
+      recInst,
+    ] = await Promise.all([
+      db.settings.get(1),
+      db.categories.toArray(),
+      db.freeExpenses.toArray(),
+      db.fixedExpenses.toArray(),
+      db.forecasts.toArray(),
+      db.incomes.toArray(),
+      db.savings.toArray(),
+      db.weeklyBudgets.toArray(),
+      db.weeklyBudgetAssignments.toArray(),
+      db.recurringInstances.toArray(),
+    ]);
 
     setSettings(set);
     setCategories(cats);
@@ -88,6 +140,7 @@ function App() {
     setIncomes(inc);
     setSavings(sav);
     setWeeklyBudgets(weekBud);
+    setWeeklyBudgetAssignments(weekAssign);
     setRecurringInstances(recInst);
   };
 
@@ -95,8 +148,6 @@ function App() {
   const weekStartDay = settings?.weekStartDay ?? 1;
 
   // Calendar layout helpers
-  const rawFirstDay = new Date(year, month, 1).getDay(); // 0=Sunday
-  const firstDayOfMonth = (rawFirstDay - weekStartDay + 7) % 7;
   const daysInMonth = new Date(year, month + 1, 0).getDate();
 
   const monthNames = [
@@ -298,6 +349,126 @@ function App() {
     return events;
   };
 
+  // Get events for a specific date string (for week view which can span months)
+  const getEventsForDate = (dateStr) => {
+    const events = [];
+    const d = new Date(dateStr);
+    const y = d.getFullYear();
+    const m = d.getMonth();
+    const day = d.getDate();
+    const yearMonth = formatYearMonth(y, m);
+
+    // Fixed expenses
+    fixedExpenses
+      .filter((e) => {
+        if (e.active === false) return false;
+
+        if (e.isRecurring) {
+          const instance = getInstanceFor("fixedExpense", e.id, yearMonth);
+
+          if (instance) {
+            if (instance.status === "assigned" && instance.assignedDate) {
+              return instance.assignedDate === dateStr;
+            }
+            return false;
+          }
+
+          if (e.dateType === "fixed" && e.dayOfMonth) {
+            const adjustedDay = getAdjustedDay(e.dayOfMonth, y, m);
+            return adjustedDay === day;
+          }
+
+          return false;
+        }
+
+        return e.date === dateStr;
+      })
+      .forEach((e) => {
+        const instance = getInstanceFor("fixedExpense", e.id, yearMonth);
+        events.push({
+          type: "fixed",
+          ...e,
+          amount: instance?.actualAmount ?? e.amount,
+        });
+      });
+
+    // Forecasts
+    forecasts
+      .filter((f) => f.date === dateStr)
+      .forEach((f) => events.push({ type: "forecast", ...f }));
+
+    // Free expenses
+    freeExpenses
+      .filter((e) => e.date === dateStr)
+      .forEach((e) => events.push({ type: "free", ...e }));
+
+    // Incomes
+    incomes
+      .filter((i) => {
+        if (i.isRecurring) {
+          const instance = getInstanceFor("income", i.id, yearMonth);
+
+          if (instance) {
+            if (instance.status === "assigned" && instance.assignedDate) {
+              return instance.assignedDate === dateStr;
+            }
+            return false;
+          }
+
+          if (i.dateType === "fixed" && i.dayOfMonth) {
+            const adjustedDay = getAdjustedDay(i.dayOfMonth, y, m);
+            return adjustedDay === day;
+          }
+
+          return false;
+        }
+
+        return i.date === dateStr;
+      })
+      .forEach((i) => {
+        const instance = getInstanceFor("income", i.id, yearMonth);
+        events.push({
+          type: "income",
+          ...i,
+          amount: instance?.actualAmount ?? i.amount,
+        });
+      });
+
+    // Savings
+    savings
+      .filter((s) => {
+        if (s.isRecurring) {
+          const instance = getInstanceFor("savings", s.id, yearMonth);
+
+          if (instance) {
+            if (instance.status === "assigned" && instance.assignedDate) {
+              return instance.assignedDate === dateStr;
+            }
+            return false;
+          }
+
+          if (s.dateType === "fixed" && s.dayOfMonth) {
+            const adjustedDay = getAdjustedDay(s.dayOfMonth, y, m);
+            return adjustedDay === day;
+          }
+
+          return false;
+        }
+
+        return s.date === dateStr;
+      })
+      .forEach((s) => {
+        const instance = getInstanceFor("savings", s.id, yearMonth);
+        events.push({
+          type: "savings",
+          ...s,
+          amount: instance?.actualAmount ?? s.amount,
+        });
+      });
+
+    return events;
+  };
+
   // ---------------------------
   // Week + budget helpers
   // ---------------------------
@@ -353,14 +524,20 @@ function App() {
   // Dashboard calculation
   // ---------------------------
   const calculateDashboard = () => {
-    const yearMonth = formatYearMonth(year, month);
+    // Use effective year/month (changes based on view and week navigation)
+    const dashYear = effectiveYearMonth.year;
+    const dashMonth = effectiveYearMonth.month;
+    const yearMonth = formatYearMonth(dashYear, dashMonth);
 
-    const thisMonthFree = freeExpenses.filter((e) => isInCurrentMonth(e.date));
-    const thisMonthForecasts = forecasts.filter((f) =>
-      isInCurrentMonth(f.date),
-    );
+    const isInDashMonth = (dateStr) => {
+      const d = new Date(dateStr);
+      return d.getMonth() === dashMonth && d.getFullYear() === dashYear;
+    };
+
+    const thisMonthFree = freeExpenses.filter((e) => isInDashMonth(e.date));
+    const thisMonthForecasts = forecasts.filter((f) => isInDashMonth(f.date));
     const thisMonthSavings = savings.filter((s) =>
-      s.date ? isInCurrentMonth(s.date) : true,
+      s.date ? isInDashMonth(s.date) : true,
     );
 
     // --- CURRENT BALANCE (up to today) ---
@@ -371,7 +548,7 @@ function App() {
         // If there is an instance, only count it if assigned and passed
         if (inst) {
           if (inst.status !== "assigned") return sum;
-          const occ = getEffectiveOccurrenceDate(i, inst, year, month);
+          const occ = getEffectiveOccurrenceDate(i, inst, dashYear, dashMonth);
           if (occ && hasDatePassed(occ)) {
             return sum + (inst.actualAmount ?? i.amount);
           }
@@ -379,13 +556,13 @@ function App() {
         }
 
         // No instance yet => predict by fixed day
-        const occ = getEffectiveOccurrenceDate(i, null, year, month);
+        const occ = getEffectiveOccurrenceDate(i, null, dashYear, dashMonth);
         if (occ && hasDatePassed(occ)) return sum + i.amount;
         return sum;
       }
 
       // One-time income
-      if (i.date && isInCurrentMonth(i.date) && hasDatePassed(i.date)) {
+      if (i.date && isInDashMonth(i.date) && hasDatePassed(i.date)) {
         return sum + i.amount;
       }
       return sum;
@@ -399,20 +576,20 @@ function App() {
 
         if (inst) {
           if (inst.status !== "assigned") return sum;
-          const occ = getEffectiveOccurrenceDate(e, inst, year, month);
+          const occ = getEffectiveOccurrenceDate(e, inst, dashYear, dashMonth);
           if (occ && hasDatePassed(occ)) {
             return sum + (inst.actualAmount ?? e.amount);
           }
           return sum;
         }
 
-        const occ = getEffectiveOccurrenceDate(e, null, year, month);
+        const occ = getEffectiveOccurrenceDate(e, null, dashYear, dashMonth);
         if (occ && hasDatePassed(occ)) return sum + e.amount;
         return sum;
       }
 
       // One-time fixed expense
-      if (e.date && isInCurrentMonth(e.date) && hasDatePassed(e.date)) {
+      if (e.date && isInDashMonth(e.date) && hasDatePassed(e.date)) {
         return sum + e.amount;
       }
 
@@ -438,19 +615,19 @@ function App() {
 
         if (inst) {
           if (inst.status !== "assigned") return sum;
-          const occ = getEffectiveOccurrenceDate(s, inst, year, month);
+          const occ = getEffectiveOccurrenceDate(s, inst, dashYear, dashMonth);
           if (occ && hasDatePassed(occ)) {
             return sum + (inst.actualAmount ?? s.amount);
           }
           return sum;
         }
 
-        const occ = getEffectiveOccurrenceDate(s, null, year, month);
+        const occ = getEffectiveOccurrenceDate(s, null, dashYear, dashMonth);
         if (occ && hasDatePassed(occ)) return sum + s.amount;
         return sum;
       }
 
-      if (s.date && isInCurrentMonth(s.date) && hasDatePassed(s.date)) {
+      if (s.date && isInDashMonth(s.date) && hasDatePassed(s.date)) {
         return sum + s.amount;
       }
       return sum;
@@ -462,45 +639,69 @@ function App() {
     // --- MONTH-END FORECAST (end-of-month estimation for the VIEWED month) ---
     const totalIncome = incomes.reduce((sum, i) => {
       if (i.isRecurring) return sum + i.amount;
-      if (i.date && isInCurrentMonth(i.date)) return sum + i.amount;
+      if (i.date && isInDashMonth(i.date)) return sum + i.amount;
       return sum;
     }, 0);
 
     const totalFixed = fixedExpenses
       .filter((e) => e.active !== false)
-      .reduce((sum, e) => sum + e.amount, 0);
+      .reduce((sum, e) => {
+        // For recurring, count the amount for this month
+        if (e.isRecurring) return sum + e.amount;
+        // For one-time, only if in this month
+        if (e.date && isInDashMonth(e.date)) return sum + e.amount;
+        return sum;
+      }, 0);
 
     const totalForecasts = thisMonthForecasts
-      .filter((f) => f.status === "pending")
+      .filter((f) => f.deductFrom !== "weekly") // Only count forecasts NOT deducted from weekly
       .reduce((sum, f) => sum + f.amount, 0);
 
-    const totalSavings = thisMonthSavings.reduce(
-      (sum, s) => sum + (s.amount || 0),
-      0,
-    );
+    const totalSavings = savings.reduce((sum, s) => {
+      if (s.isRecurring) return sum + s.amount;
+      if (s.date && isInDashMonth(s.date)) return sum + s.amount;
+      return sum;
+    }, 0);
 
     // --- Weekly budgets for this viewed month ---
-    // Week belongs to the month where it STARTS (same rule you wrote)
-    const getWeeksInViewedMonth = (y, m, weekStartDay) => {
+    // Check weeklyBudgetAssignments for cross-month weeks
+    const getWeeksInViewedMonth = (y, m, wkStartDay) => {
       const weeks = [];
       const firstOfMonth = new Date(y, m, 1);
+      const lastOfMonth = new Date(y, m + 1, 0);
 
-      let weekStart = getWeekStart(firstOfMonth, weekStartDay);
+      let weekStart = getWeekStart(firstOfMonth, wkStartDay);
 
-      // If that week start is in previous month, move to next week
-      if (weekStart.getMonth() !== m || weekStart.getFullYear() !== y) {
-        weekStart.setDate(weekStart.getDate() + 7);
-      }
+      // Include the week if it starts in this month OR if it's assigned to this month
+      while (weekStart <= lastOfMonth) {
+        const weekStartStr = formatDateStr(weekStart);
+        const assignment = weeklyBudgetAssignments.find(
+          (a) => a.weekStart === weekStartStr,
+        );
 
-      while (weekStart.getMonth() === m && weekStart.getFullYear() === y) {
-        weeks.push(new Date(weekStart));
+        const weekBelongsToThisMonth =
+          (weekStart.getMonth() === m && weekStart.getFullYear() === y) ||
+          assignment?.assignedMonth === formatYearMonth(y, m);
+
+        // Exclude if assigned to a different month
+        const assignedElsewhere =
+          assignment && assignment.assignedMonth !== formatYearMonth(y, m);
+
+        if (weekBelongsToThisMonth && !assignedElsewhere) {
+          weeks.push(new Date(weekStart));
+        }
+
         weekStart.setDate(weekStart.getDate() + 7);
       }
 
       return weeks;
     };
 
-    const weeksThisMonth = getWeeksInViewedMonth(year, month, weekStartDay);
+    const weeksThisMonth = getWeeksInViewedMonth(
+      dashYear,
+      dashMonth,
+      weekStartDay,
+    );
 
     let totalWeeklyBudgets = 0;
     let totalWeeklySpent = 0;
@@ -520,6 +721,7 @@ function App() {
 
     const totalWeeklyRemaining = totalWeeklyBudgets - totalWeeklySpent;
 
+    // Month-end forecast: Income - Fixed - Savings - Forecasts(non-weekly) - WeeklyBudgets - Overspending
     const monthEndForecast =
       totalIncome -
       totalSavings -
@@ -531,9 +733,9 @@ function App() {
     // --- Current week budget (relative to today) ---
     // If you're viewing another month, this is still "today's week", which is fine for the top dashboard
     const now = new Date();
-    const currentWeekStart = getWeekStart(now, weekStartDay);
-    const weeklySpent = getWeekSpent(currentWeekStart);
-    const weekStartStr = formatDateStr(currentWeekStart);
+    const todayWeekStart = getWeekStart(now, weekStartDay);
+    const weeklySpent = getWeekSpent(todayWeekStart);
+    const weekStartStr = formatDateStr(todayWeekStart);
     const customBudget = weeklyBudgets.find(
       (wb) => wb.weekStart === weekStartStr,
     );
@@ -553,6 +755,8 @@ function App() {
       weeklySpent,
       weeklyBudget,
       weeklyRemaining,
+      dashYear,
+      dashMonth,
     };
   };
 
@@ -616,12 +820,6 @@ function App() {
     });
   };
 
-  // Calendar cells
-  const calendarDays = [];
-  for (let i = 0; i < firstDayOfMonth; i++) calendarDays.push(null);
-  for (let day = 1; day <= daysInMonth; day++) calendarDays.push(day);
-  while (calendarDays.length % 7 !== 0) calendarDays.push(null);
-
   const eventColors = {
     fixed: "bg-purple-900/40 text-purple-200",
     forecast: "bg-orange-700/30 text-orange-200",
@@ -630,14 +828,28 @@ function App() {
     savings: "bg-emerald-900/40 text-emerald-200",
   };
 
-  const getDayNames = () => {
+  // Calendar always starts on Monday (1), week view uses weekStartDay from settings
+  const calendarStartDay = 1; // Monday
+
+  const getDayNames = (startDay) => {
     const allDays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
     const result = [];
     for (let i = 0; i < 7; i++) {
-      result.push(allDays[(weekStartDay + i) % 7]);
+      result.push(allDays[(startDay + i) % 7]);
     }
     return result;
   };
+
+  // Recalculate calendar layout with Monday start
+  const rawFirstDayCalendar = new Date(year, month, 1).getDay();
+  const firstDayOfMonthCalendar =
+    (rawFirstDayCalendar - calendarStartDay + 7) % 7;
+
+  // Calendar cells
+  const calendarDays = [];
+  for (let i = 0; i < firstDayOfMonthCalendar; i++) calendarDays.push(null);
+  for (let day = 1; day <= daysInMonth; day++) calendarDays.push(day);
+  while (calendarDays.length % 7 !== 0) calendarDays.push(null);
 
   return (
     <div className="p-5 max-w-2xl mx-auto">
@@ -655,24 +867,48 @@ function App() {
 
       <MainDashboard data={dashboard} />
 
-      <div className="flex mb-4 gap-2">
-        {/* Calendar Grid */}
-        <div className="flex-1 border border-border rounded-xl overflow-hidden">
+      {/* View selector */}
+      <div className="flex gap-2 mb-4">
+        <button
+          onClick={() => setCurrentView("calendar")}
+          className={`flex-1 py-2 px-4 rounded-lg text-sm font-medium transition-colors ${
+            currentView === "calendar"
+              ? "bg-blue-6 text-white"
+              : "bg-surface text-text-muted hover:bg-blue-3"
+          }`}
+        >
+          📅 Calendar
+        </button>
+        <button
+          onClick={() => setCurrentView("week")}
+          className={`flex-1 py-2 px-4 rounded-lg text-sm font-medium transition-colors ${
+            currentView === "week"
+              ? "bg-blue-6 text-white"
+              : "bg-surface text-text-muted hover:bg-blue-3"
+          }`}
+        >
+          📊 Week View
+        </button>
+      </div>
+
+      {currentView === "calendar" ? (
+        /* Calendar Grid - without budget sidebar */
+        <div className="mb-4 border border-border rounded-xl overflow-hidden">
           <table
             className="w-full border-collapse"
             style={{ tableLayout: "fixed" }}
           >
             <thead>
               <tr>
-                {getDayNames().map((d, i) => {
-                  const actualDay = (weekStartDay + i) % 7;
-                  const isWeekend = actualDay === 0 || actualDay === 6;
+                {getDayNames(calendarStartDay).map((d, i) => {
+                  const actualDay = (calendarStartDay + i) % 7;
+                  const isSunday = actualDay === 0;
                   return (
                     <th
                       key={d}
                       className={`p-2 border-b border-r border-border text-sm font-bold 
                         last:border-r-0
-                        ${isWeekend ? "bg-red-900/10" : "bg-surface"}`}
+                        ${isSunday ? "bg-red-900/10" : "bg-surface"}`}
                     >
                       {d}
                     </th>
@@ -697,8 +933,8 @@ function App() {
                           new Date().getMonth() === month &&
                           new Date().getFullYear() === year;
 
-                        const actualDay = (weekStartDay + di) % 7;
-                        const isWeekend = actualDay === 0 || actualDay === 6;
+                        const actualDay = (calendarStartDay + di) % 7;
+                        const isSunday = actualDay === 0;
 
                         return (
                           <td
@@ -707,7 +943,7 @@ function App() {
                               border-b border-border p-1 align-top h-24 text-xs transition-colors
                               last:border-r-0
                               ${!day ? "bg-surface/50" : "cursor-pointer hover:bg-blue-3"}
-                              ${isToday ? "bg-blue-2" : isWeekend && day ? "bg-red-900/10" : ""}
+                              ${isToday ? "bg-blue-2" : isSunday && day ? "bg-red-900/10" : ""}
                               ${isLastRow ? "border-b-0" : ""}
                             `}
                             onClick={() => day && handleDayClick(day)}
@@ -756,58 +992,43 @@ function App() {
             </tbody>
           </table>
         </div>
-
-        {/* Budget sidebar */}
-        <div className="flex flex-col ">
-          <div className="h-[39px] flex items-center justify-center"></div>
-          {Array.from({ length: Math.ceil(calendarDays.length / 7) }).map(
-            (_, wi) => {
-              const weekDays = calendarDays.slice(wi * 7, (wi + 1) * 7);
-              const firstDayOfWeek = weekDays.find((d) => d !== null);
-              const weekStartDate = firstDayOfWeek
-                ? getWeekStart(
-                    new Date(year, month, firstDayOfWeek),
-                    weekStartDay,
-                  )
-                : null;
-
-              const weekSpent = weekStartDate ? getWeekSpent(weekStartDate) : 0;
-              const weekBudget = weekStartDate
-                ? getWeekBudget(weekStartDate)
-                : settings?.weeklyBudget || 0;
-              const weekRemaining = weekBudget - weekSpent;
-
-              return (
-                <div
-                  key={wi}
-                  className="h-24 flex items-center justify-center text-center text-xs cursor-pointer hover:bg-blue-3 transition-colors rounded-xl"
-                  onClick={() =>
-                    weekStartDate &&
-                    setModal({
-                      type: "weeklyBudget",
-                      data: {
-                        weekStart: formatDateStr(weekStartDate),
-                        currentBudget: weekBudget,
-                      },
-                    })
-                  }
-                >
-                  {weekStartDate && (
-                    <div
-                      className={`nr-500 text-lg font-bold ${weekRemaining < 0 ? "text-red-400" : "text-text-muted"}`}
-                    >
-                      {weekRemaining.toFixed(0)}€
-                      <div className="text-text-muted nr-400 font-normal text-[10px]">
-                        /{weekBudget}€
-                      </div>
-                    </div>
-                  )}
-                </div>
-              );
-            },
+      ) : (
+        /* Week View */
+        <div className="mb-4">
+          {currentWeekStart && (
+            <WeekView
+              weekStartDay={weekStartDay}
+              settings={settings}
+              freeExpenses={freeExpenses}
+              forecasts={forecasts}
+              fixedExpenses={fixedExpenses}
+              incomes={incomes}
+              savings={savings}
+              weeklyBudgets={weeklyBudgets}
+              weeklyBudgetAssignments={weeklyBudgetAssignments}
+              recurringInstances={recurringInstances}
+              eventColors={eventColors}
+              onDayClick={(date) => {
+                // date is a Date object from WeekView
+                setModal({
+                  type: "dayActions",
+                  data: { day: date.getDate(), fullDate: date },
+                });
+              }}
+              onEditWeeklyBudget={(weekStart, currentBudget) =>
+                setModal({
+                  type: "weeklyBudget",
+                  data: { weekStart, currentBudget },
+                })
+              }
+              onReload={loadAllData}
+              currentWeekStart={currentWeekStart}
+              onWeekChange={setCurrentWeekStart}
+              getEventsForDate={getEventsForDate}
+            />
           )}
         </div>
-      </div>
+      )}
 
       <InputDashboard
         data={dashboard}
@@ -821,8 +1042,15 @@ function App() {
         day={modal.data?.day}
         month={month}
         year={year}
+        fullDate={modal.data?.fullDate}
         monthNames={monthNames}
-        events={modal.data?.day ? getEventsForDay(modal.data.day) : []}
+        events={
+          modal.data?.fullDate
+            ? getEventsForDate(formatDateStr(modal.data.fullDate))
+            : modal.data?.day
+              ? getEventsForDay(modal.data.day)
+              : []
+        }
         eventColors={eventColors}
         onOpenModal={(type, data) => setModal({ type, data })}
         onEdit={handleEdit}
@@ -838,8 +1066,8 @@ function App() {
         <FreeExpenseForm
           categories={categories}
           defaultDay={modal.data?.day}
-          year={year}
-          month={month}
+          year={modal.data?.fullDate ? modal.data.fullDate.getFullYear() : year}
+          month={modal.data?.fullDate ? modal.data.fullDate.getMonth() : month}
           onSave={closeModal}
           onCategoriesChanged={loadAllData}
         />
@@ -865,8 +1093,8 @@ function App() {
         <ForecastForm
           categories={categories}
           defaultDay={modal.data?.day}
-          year={year}
-          month={month}
+          year={modal.data?.fullDate ? modal.data.fullDate.getFullYear() : year}
+          month={modal.data?.fullDate ? modal.data.fullDate.getMonth() : month}
           onSave={closeModal}
           onCategoriesChanged={loadAllData}
         />
@@ -892,8 +1120,8 @@ function App() {
         <SavingsForm
           categories={categories}
           defaultDay={modal.data?.day}
-          year={year}
-          month={month}
+          year={modal.data?.fullDate ? modal.data.fullDate.getFullYear() : year}
+          month={modal.data?.fullDate ? modal.data.fullDate.getMonth() : month}
           onSave={closeModal}
           onCategoriesChanged={loadAllData}
         />
