@@ -221,3 +221,139 @@ export function getRecurringDateForMonth(item, year, month) {
   const adjustedDay = getAdjustedDay(item.dayOfMonth, year, month);
   return `${year}-${String(month + 1).padStart(2, "0")}-${String(adjustedDay).padStart(2, "0")}`;
 }
+
+// Auto-complete instances for past dates that don't have an instance yet
+export async function autoCompletePassedInstances(
+  db,
+  fixedExpenses,
+  incomes,
+  savings,
+  instances,
+  year,
+  month,
+) {
+  const yearMonth = formatYearMonth(year, month);
+  const today = new Date();
+  const currentYear = today.getFullYear();
+  const currentMonth = today.getMonth();
+  const currentDay = today.getDate();
+
+  const newInstances = [];
+
+  // Helper to check if a date has passed
+  const hasDatePassed = (itemYear, itemMonth, itemDay) => {
+    if (itemYear < currentYear) return true;
+    if (itemYear === currentYear && itemMonth < currentMonth) return true;
+    if (
+      itemYear === currentYear &&
+      itemMonth === currentMonth &&
+      itemDay <= currentDay
+    )
+      return true;
+    return false;
+  };
+
+  // Process fixed expenses
+  fixedExpenses
+    .filter(
+      (item) =>
+        item.isRecurring && isRecurringActiveForMonth(item, year, month),
+    )
+    .forEach((item) => {
+      const existingInstance = getInstanceForMonth(
+        instances,
+        item.id,
+        "fixedExpense",
+        yearMonth,
+      );
+
+      if (!existingInstance && item.dateType === "fixed" && item.dayOfMonth) {
+        const adjustedDay = getAdjustedDay(item.dayOfMonth, year, month);
+
+        if (hasDatePassed(year, month, adjustedDay)) {
+          newInstances.push({
+            parentId: item.id,
+            parentType: "fixedExpense",
+            yearMonth,
+            assignedDate: `${year}-${String(month + 1).padStart(2, "0")}-${String(adjustedDay).padStart(2, "0")}`,
+            actualAmount: item.baseAmount ?? item.amount,
+            status: "assigned",
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          });
+        }
+      }
+    });
+
+  // Process incomes
+  incomes
+    .filter(
+      (item) =>
+        item.isRecurring && isRecurringActiveForMonth(item, year, month),
+    )
+    .forEach((item) => {
+      const existingInstance = getInstanceForMonth(
+        instances,
+        item.id,
+        "income",
+        yearMonth,
+      );
+
+      if (!existingInstance && item.dateType === "fixed" && item.dayOfMonth) {
+        const adjustedDay = getAdjustedDay(item.dayOfMonth, year, month);
+
+        if (hasDatePassed(year, month, adjustedDay)) {
+          newInstances.push({
+            parentId: item.id,
+            parentType: "income",
+            yearMonth,
+            assignedDate: `${year}-${String(month + 1).padStart(2, "0")}-${String(adjustedDay).padStart(2, "0")}`,
+            actualAmount: item.baseAmount ?? item.amount,
+            status: "assigned",
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          });
+        }
+      }
+    });
+
+  // Process savings
+  savings
+    .filter(
+      (item) =>
+        item.isRecurring && isRecurringActiveForMonth(item, year, month),
+    )
+    .forEach((item) => {
+      const existingInstance = getInstanceForMonth(
+        instances,
+        item.id,
+        "savings",
+        yearMonth,
+      );
+
+      if (!existingInstance && item.dateType === "fixed" && item.dayOfMonth) {
+        const adjustedDay = getAdjustedDay(item.dayOfMonth, year, month);
+
+        if (hasDatePassed(year, month, adjustedDay)) {
+          newInstances.push({
+            parentId: item.id,
+            parentType: "savings",
+            yearMonth,
+            assignedDate: `${year}-${String(month + 1).padStart(2, "0")}-${String(adjustedDay).padStart(2, "0")}`,
+            actualAmount: item.baseAmount ?? item.amount,
+            status: "assigned",
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          });
+        }
+      }
+    });
+
+  // Bulk add new instances
+  if (newInstances.length > 0) {
+    await db.recurringInstances.bulkAdd(newInstances);
+    return true; // Indicates data was changed
+  }
+
+  return false;
+}

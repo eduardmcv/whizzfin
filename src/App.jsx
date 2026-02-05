@@ -12,6 +12,7 @@ import {
   getPendingAssignmentsCount,
   getAdjustedDay,
   formatYearMonth,
+  autoCompletePassedInstances,
 } from "./lib/recurring";
 
 import FreeExpenseForm from "./components/forms/FreeExpenseForm";
@@ -36,9 +37,32 @@ function App() {
   const [selectedDay, setSelectedDay] = useState(null);
   const [recurringInstances, setRecurringInstances] = useState([]);
 
+  const year = currentDate.getFullYear();
+  const month = currentDate.getMonth();
+
   useEffect(() => {
     loadAllData();
   }, [currentDate]);
+
+  useEffect(() => {
+    const autoComplete = async () => {
+      if (fixedExpenses.length || incomes.length || savings.length) {
+        const changed = await autoCompletePassedInstances(
+          db,
+          fixedExpenses,
+          incomes,
+          savings,
+          recurringInstances,
+          year,
+          month,
+        );
+        if (changed) {
+          loadAllData();
+        }
+      }
+    };
+    autoComplete();
+  }, [fixedExpenses, incomes, savings, recurringInstances, year, month]);
 
   const loadAllData = async () => {
     const [set, cats, free, fixed, fore, inc, sav, weekBud, recInst] =
@@ -63,9 +87,6 @@ function App() {
     setWeeklyBudgets(weekBud);
     setRecurringInstances(recInst);
   };
-
-  const year = currentDate.getFullYear();
-  const month = currentDate.getMonth();
 
   // Get week start day from settings (0=Sunday, 1=Monday, etc.)
   const weekStartDay = settings?.weekStartDay ?? 1; // Default to Monday
@@ -943,6 +964,7 @@ function App() {
       </Modal>
 
       {/* Pending Assignments Modal */}
+      {/* Pending Assignments Modal */}
       <PendingAssignmentsModal
         isOpen={modal.type === "pendingAssignments"}
         onClose={closeModal}
@@ -950,6 +972,16 @@ function App() {
         year={year}
         month={month}
         onUpdate={loadAllData}
+        onEditTemplate={(item) => {
+          // Open the appropriate edit form based on parentType
+          const editType = {
+            income: "editIncome",
+            fixedExpense: "editFixed",
+            savings: "editSavings",
+          }[item.parentType];
+
+          setModal({ type: editType, data: item });
+        }}
       />
     </div>
   );

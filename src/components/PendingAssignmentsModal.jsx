@@ -9,6 +9,7 @@ function PendingAssignmentsModal({
   year,
   month,
   onUpdate,
+  onEditTemplate,
 }) {
   if (!isOpen) return null;
 
@@ -50,24 +51,18 @@ function PendingAssignmentsModal({
   };
 
   const handleUnassign = async (item) => {
+    // Only allow unassign if instance was manually created (not auto-completed)
     if (item.instance?.id) {
-      await db.recurringInstances.update(item.instance.id, {
-        assignedDate: null,
-        status: "pending",
-        updatedAt: new Date().toISOString(),
-      });
-    } else {
-      // Create instance as pending (for fixed day items that were auto-assigned)
-      await db.recurringInstances.add({
-        parentId: item.id,
-        parentType: item.parentType,
-        yearMonth,
-        assignedDate: null,
-        actualAmount: item.baseAmount ?? item.amount,
-        status: "pending",
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      });
+      // If it's a fixed day item, delete the instance to revert to template
+      if (item.dateType === "fixed") {
+        await db.recurringInstances.delete(item.instance.id);
+      } else {
+        await db.recurringInstances.update(item.instance.id, {
+          assignedDate: null,
+          status: "pending",
+          updatedAt: new Date().toISOString(),
+        });
+      }
     }
     onUpdate();
   };
@@ -97,7 +92,6 @@ function PendingAssignmentsModal({
 
   const handleUnskip = async (item) => {
     if (item.instance?.id) {
-      // If it has a fixed day, restore to assigned, otherwise to pending
       if (item.dateType === "fixed") {
         await db.recurringInstances.delete(item.instance.id);
       } else {
@@ -177,6 +171,7 @@ function PendingAssignmentsModal({
                       onAssign={handleAssign}
                       onUnassign={handleUnassign}
                       onSkip={handleSkip}
+                      onEditTemplate={onEditTemplate}
                     />
                   ))}
                 </>
@@ -199,6 +194,7 @@ function PendingAssignmentsModal({
                         onAssign={handleAssign}
                         onUnassign={handleUnassign}
                         onSkip={handleSkip}
+                        onEditTemplate={onEditTemplate}
                       />
                     </div>
                   ))}
@@ -216,31 +212,41 @@ function PendingAssignmentsModal({
                   {skippedItems.map((item) => (
                     <div
                       key={`${item.parentType}-${item.id}`}
-                      className="p-3 bg-surface/30 rounded-lg flex justify-between items-center opacity-40"
+                      className="p-3 bg-surface/30 rounded-lg opacity-40"
                     >
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-text line-through">
-                            {item.title || item.description || "Untitled"}
-                          </span>
-                          <span
-                            className={`text-xs ${getTypeColor(item.parentType)}`}
-                          >
-                            {getTypeLabel(item.parentType)}
-                          </span>
-                        </div>
-                        <div className="text-sm text-text-muted">
-                          {item.baseAmount?.toFixed(2) ||
-                            item.amount?.toFixed(2)}
-                          €
+                      <div className="flex justify-between items-start mb-2">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-text line-through">
+                              {item.title || item.description || "Untitled"}
+                            </span>
+                            <span
+                              className={`text-xs ${getTypeColor(item.parentType)}`}
+                            >
+                              {getTypeLabel(item.parentType)}
+                            </span>
+                          </div>
+                          <div className="text-sm text-text-muted">
+                            {item.baseAmount?.toFixed(2) ||
+                              item.amount?.toFixed(2)}
+                            €
+                          </div>
                         </div>
                       </div>
-                      <button
-                        onClick={() => handleUnskip(item)}
-                        className="px-3 py-1 text-sm border border-border rounded hover:bg-surface text-text-muted"
-                      >
-                        Restore
-                      </button>
+                      <div className="flex gap-2 mt-3">
+                        <button
+                          onClick={() => onEditTemplate(item)}
+                          className="px-3 py-1 text-sm border border-border rounded hover:bg-surface text-text-muted"
+                        >
+                          Edit template
+                        </button>
+                        <button
+                          onClick={() => handleUnskip(item)}
+                          className="px-3 py-1 text-sm border border-border rounded hover:bg-surface text-text-muted"
+                        >
+                          Restore
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </>
@@ -261,8 +267,9 @@ function AssignmentCard({
   onAssign,
   onUnassign,
   onSkip,
+  onEditTemplate,
 }) {
-  const [isEditing, setIsEditing] = useState(false);
+  const [isAdjusting, setIsAdjusting] = useState(false);
   const [date, setDate] = useState(item.assignedDate || today);
   const [amount, setAmount] = useState(
     item.actualAmount || item.baseAmount || item.amount || "",
@@ -270,17 +277,20 @@ function AssignmentCard({
 
   const handleSave = () => {
     onAssign(item, date, amount);
-    setIsEditing(false);
+    setIsAdjusting(false);
   };
 
   const handleCancel = () => {
     setDate(item.assignedDate || today);
     setAmount(item.actualAmount || item.baseAmount || item.amount || "");
-    setIsEditing(false);
+    setIsAdjusting(false);
   };
 
   const isAssigned = item.status === "assigned";
   const isPending = item.status === "pending";
+
+  // Check if this instance was manually modified (has an instance record)
+  const isManuallyModified = !!item.instance?.id;
 
   return (
     <div className="p-3 bg-surface rounded-lg">
@@ -297,6 +307,7 @@ function AssignmentCard({
           <div className="text-sm text-text-muted">
             Base: {item.baseAmount?.toFixed(2) || item.amount?.toFixed(2)}€
             {item.dateType === "fixed" && ` · Day ${item.dayOfMonth}`}
+            {item.dateType === "unassigned" && ` · Unassigned`}
           </div>
         </div>
         <div className="flex items-center gap-1">
@@ -313,7 +324,7 @@ function AssignmentCard({
         </div>
       </div>
 
-      {isEditing ? (
+      {isAdjusting ? (
         <div className="flex flex-col gap-2 mt-3">
           <div className="flex gap-2">
             <input
@@ -347,47 +358,66 @@ function AssignmentCard({
           </div>
         </div>
       ) : (
-        <div className="flex gap-2 mt-3">
-          {isAssigned ? (
-            <>
-              <div className="flex-1 text-sm text-text-muted">
-                {item.assignedDate} · {item.actualAmount?.toFixed(2)}€
-              </div>
-              <button
-                onClick={() => setIsEditing(true)}
-                className="px-3 py-1 text-sm border border-border rounded hover:bg-surface text-text-muted"
-              >
-                Edit
-              </button>
-              <button
-                onClick={() => onUnassign(item)}
-                className="px-3 py-1 text-sm border border-border rounded hover:bg-surface text-text-muted"
-              >
-                Unassign
-              </button>
-              <button
-                onClick={() => onSkip(item)}
-                className="px-3 py-1 text-sm border border-red-900 rounded hover:bg-red-950 text-red-400"
-              >
-                Skip
-              </button>
-            </>
-          ) : (
-            <>
-              <button
-                onClick={() => setIsEditing(true)}
-                className="flex-1 p-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
-              >
-                Assign
-              </button>
-              <button
-                onClick={() => onSkip(item)}
-                className="px-3 py-2 text-sm border border-border rounded hover:bg-surface text-text-muted"
-              >
-                Skip
-              </button>
-            </>
+        <div className="flex flex-col gap-2 mt-3">
+          {/* Show current assignment info if assigned */}
+          {isAssigned && (
+            <div className="text-sm text-text-muted mb-1">
+              {item.assignedDate} · {item.actualAmount?.toFixed(2)}€
+              {isManuallyModified && (
+                <span className="text-xs text-blue-400 ml-2">(adjusted)</span>
+              )}
+            </div>
           )}
+
+          {/* Action buttons */}
+          <div className="flex gap-2 flex-wrap">
+            <button
+              onClick={() => onEditTemplate(item)}
+              className="px-3 py-1.5 text-sm border border-border rounded hover:bg-surface text-text-muted"
+            >
+              Edit template
+            </button>
+
+            {isAssigned ? (
+              <>
+                <button
+                  onClick={() => setIsAdjusting(true)}
+                  className="px-3 py-1.5 text-sm border border-border rounded hover:bg-surface text-text-muted"
+                >
+                  Adjust this month
+                </button>
+                {isManuallyModified && (
+                  <button
+                    onClick={() => onUnassign(item)}
+                    className="px-3 py-1.5 text-sm border border-border rounded hover:bg-surface text-text-muted"
+                  >
+                    Reset to template
+                  </button>
+                )}
+                <button
+                  onClick={() => onSkip(item)}
+                  className="px-3 py-1.5 text-sm border border-red-900 rounded hover:bg-red-950 text-red-400"
+                >
+                  Skip
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  onClick={() => setIsAdjusting(true)}
+                  className="flex-1 p-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
+                >
+                  Assign
+                </button>
+                <button
+                  onClick={() => onSkip(item)}
+                  className="px-3 py-2 text-sm border border-border rounded hover:bg-surface text-text-muted"
+                >
+                  Skip
+                </button>
+              </>
+            )}
+          </div>
         </div>
       )}
     </div>
