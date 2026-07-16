@@ -17,14 +17,14 @@ const PLUS_ICON = (
   </svg>
 );
 
-function Card({ onClick, topText, mainText, mainClass, iconBg, icon, span }) {
+function Card({ onClick, topText, mainText, iconBg, icon, span, extraClass = "" }) {
   return (
     <button
       onClick={onClick}
-      className={`cursor-pointer group relative overflow-hidden p-4 bg-surface rounded-lg text-center shadow-sm ${span}`}
+      className={`cursor-pointer group relative overflow-hidden p-4 bg-surface rounded-xl text-left shadow-sm ${span} ${extraClass}`}
     >
-      <div className="text-xs text-text-muted">{topText}</div>
-      <div className={`text-xl font-semibold ${mainClass}`}>{mainText}</div>
+      <div className="text-xs text-text-muted mb-1">{topText}</div>
+      <div className="pr-8 min-w-0">{mainText}</div>
       <div
         className={`absolute -bottom-1.5 -right-1.5 p-2 ${iconBg} rounded-4xl
         transition-all duration-300 ease-in-out
@@ -37,18 +37,20 @@ function Card({ onClick, topText, mainText, mainClass, iconBg, icon, span }) {
 }
 
 function InputDashboard({ data, onOpenModal, pendingRules }) {
+  const amountClass = "nr-500 text-lg md:text-xl font-semibold truncate";
+
   return (
     <div className="flex flex-col gap-4 mb-8">
-      <div className="grid grid-cols-6 gap-4">
+      <div className="grid grid-cols-6 gap-3 md:gap-4">
         {/* Add buttons */}
         <Card
           span="col-span-2"
           onClick={() => onOpenModal("addIncome")}
           topText="Income"
           mainText={
-            <span className="nr-500 text-blue-300">
+            <div className={`${amountClass} text-blue-300`}>
               {data.totalIncome.toFixed(2)}€
-            </span>
+            </div>
           }
           iconBg="bg-blue-9"
           icon={PLUS_ICON}
@@ -59,9 +61,9 @@ function InputDashboard({ data, onOpenModal, pendingRules }) {
           onClick={() => onOpenModal("addExpense")}
           topText="Expenses"
           mainText={
-            <span className="nr-500 text-red-300">
+            <div className={`${amountClass} text-red-300`}>
               {data.totalExpenses.toFixed(2)}€
-            </span>
+            </div>
           }
           iconBg="bg-red-500"
           icon={PLUS_ICON}
@@ -72,48 +74,66 @@ function InputDashboard({ data, onOpenModal, pendingRules }) {
           onClick={() => onOpenModal("addSavings")}
           topText="Savings"
           mainText={
-            <span className="nr-500 text-emerald-300">
+            <div className={`${amountClass} text-emerald-300`}>
               {data.totalSavings.toFixed(2)}€
-            </span>
+            </div>
           }
           iconBg="bg-emerald-600"
           icon={PLUS_ICON}
         />
 
         {/* Weekly budgets summary */}
-        <button
+        <Card
+          span="col-span-3"
           onClick={() => onOpenModal("settings")}
-          className="cursor-pointer group relative overflow-hidden p-4 bg-red-950/30 border-red-900/50 border rounded-lg text-center shadow-sm col-span-3"
-        >
-          <div className="text-xs text-text-muted">Weekly Budgets</div>
-          <div
-            className={`nr-500 text-xl font-semibold ${data.totalWeeklyRemaining >= 0 ? "text-text" : "text-red-400"}`}
-          >
-            {data.totalWeeklyRemaining.toFixed(2)}€
-          </div>
-          <div className="nr-500 text-xs text-text-muted">
-            / {data.totalWeeklyBudgets.toFixed(0)}€
-          </div>
-        </button>
+          topText="Weekly Budgets"
+          extraClass="bg-red-950/30 border border-red-900/50"
+          mainText={
+            <div
+              className={`${amountClass} ${data.totalWeeklyRemaining >= 0 ? "text-text" : "text-red-400"}`}
+            >
+              {data.totalWeeklyRemaining.toFixed(2)}€
+              <span className="nr-400 text-xs text-text-muted font-normal ml-1.5">
+                / {data.totalWeeklyBudgets.toFixed(0)}€
+              </span>
+            </div>
+          }
+          iconBg="bg-red-500"
+          icon={
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="white"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+              <path d="M12 6m-5 0a5 5 0 1 0 10 0a5 5 0 1 0 -10 0" />
+              <path d="M12 15v3" />
+              <path d="M10 21h4" />
+            </svg>
+          }
+        />
 
         {/* Rules */}
         <Card
           span="col-span-3"
           onClick={() => onOpenModal("rules")}
-          topText={
-            pendingRules > 0
-              ? `${pendingRules} pending`
-              : "Automations"
-          }
+          topText={pendingRules > 0 ? `${pendingRules} pending` : "Automations"}
           mainText={
-            <span className="text-gray-11 flex items-center justify-center gap-2">
+            <div className="text-lg md:text-xl font-semibold text-gray-11 flex items-center gap-2">
               Rules
               {pendingRules > 0 && (
                 <span className="text-xs bg-orange-700/50 text-orange-200 rounded-full px-2 py-0.5">
                   {pendingRules}
                 </span>
               )}
-            </span>
+            </div>
           }
           iconBg="bg-gray-4"
           icon={
@@ -141,7 +161,11 @@ function InputDashboard({ data, onOpenModal, pendingRules }) {
           span="col-span-3"
           onClick={() => onOpenModal("categories")}
           topText="Manage"
-          mainText={<span className="text-gray-11">Categories</span>}
+          mainText={
+            <div className="text-lg md:text-xl font-semibold text-gray-11">
+              Categories
+            </div>
+          }
           iconBg="bg-gray-4"
           icon={
             <svg
@@ -170,7 +194,11 @@ function InputDashboard({ data, onOpenModal, pendingRules }) {
           span="col-span-3"
           onClick={() => onOpenModal("settings")}
           topText="Configure"
-          mainText={<span className="text-gray-11">Settings</span>}
+          mainText={
+            <div className="text-lg md:text-xl font-semibold text-gray-11">
+              Settings
+            </div>
+          }
           iconBg="bg-gray-4"
           icon={
             <svg

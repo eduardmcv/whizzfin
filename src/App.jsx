@@ -49,6 +49,26 @@ const EVENT_COLORS = {
 
 const colorKeyOf = (e) => (e.type === "expense" ? e.kind : e.type);
 
+// One banner per type on each calendar day, amounts summed.
+const GROUP_ORDER = ["income", "savings", "fixed", "forecast", "casual"];
+const groupEvents = (events) => {
+  const sums = {};
+  events.forEach((e) => {
+    const k = colorKeyOf(e);
+    if (!sums[k]) sums[k] = { key: k, total: 0, allProjected: true };
+    sums[k].total += Number(e.amount);
+    if (!e.projected) sums[k].allProjected = false;
+  });
+  return GROUP_ORDER.filter((k) => sums[k]).map((k) => sums[k]);
+};
+
+const fmtAmount = (n) =>
+  Number.isInteger(n) ? String(n) : n.toFixed(2).replace(/\.?0+$/, "");
+
+// Calendar geometry (px) used to position the weekly budget circles.
+const CAL_HEADER_H = 38;
+const CAL_ROW_H = 96; // h-24
+
 function App() {
   const [settings, setSettings] = useState(null);
   const [categories, setCategories] = useState([]);
@@ -282,6 +302,7 @@ function App() {
   for (let i = 0; i < firstDayOfMonth; i++) calendarDays.push(null);
   for (let day = 1; day <= daysInMonth; day++) calendarDays.push(day);
   while (calendarDays.length % 7 !== 0) calendarDays.push(null);
+  const weekCount = Math.ceil(calendarDays.length / 7);
 
   const getDayNames = () => {
     const allDays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -346,9 +367,9 @@ function App() {
 
       <MainDashboard data={dashboard} />
 
-      <div className="flex mb-4 gap-2">
-        {/* Calendar Grid */}
-        <div className="flex-1 border border-border rounded-xl overflow-hidden">
+      {/* Calendar + floating weekly budget circles */}
+      <div className="relative mb-6">
+        <div className="border border-border rounded-xl overflow-hidden">
           <table
             className="w-full border-collapse"
             style={{ tableLayout: "fixed" }}
@@ -373,127 +394,119 @@ function App() {
             </thead>
 
             <tbody>
-              {Array.from({ length: Math.ceil(calendarDays.length / 7) }).map(
-                (_, wi) => {
-                  const weekDays = calendarDays.slice(wi * 7, (wi + 1) * 7);
-                  const isLastRow =
-                    wi === Math.ceil(calendarDays.length / 7) - 1;
+              {Array.from({ length: weekCount }).map((_, wi) => {
+                const weekDays = calendarDays.slice(wi * 7, (wi + 1) * 7);
+                const isLastRow = wi === weekCount - 1;
 
-                  return (
-                    <tr key={wi}>
-                      {weekDays.map((day, di) => {
-                        const isToday =
-                          day && toDateStr(year, month, day) === today;
-                        const actualDay = (weekStartDay + di) % 7;
-                        const isSunday = actualDay === 0;
-                        const events = day ? getEventsForDay(day) : [];
+                return (
+                  <tr key={wi}>
+                    {weekDays.map((day, di) => {
+                      const isToday =
+                        day && toDateStr(year, month, day) === today;
+                      const actualDay = (weekStartDay + di) % 7;
+                      const isSunday = actualDay === 0;
+                      const groups = day
+                        ? groupEvents(getEventsForDay(day))
+                        : [];
 
-                        return (
-                          <td
-                            key={di}
-                            className={`
-                              border-b border-border p-1 align-top h-24 text-xs transition-colors
-                              last:border-r-0
-                              ${!day ? "bg-surface/50" : "cursor-pointer hover:bg-blue-3"}
-                              ${isToday ? "bg-blue-2" : isSunday && day ? "bg-red-900/10" : ""}
-                              ${isLastRow ? "border-b-0" : ""}
-                            `}
-                            onClick={() =>
-                              day && setModal({ type: "dayActions", data: { day } })
-                            }
-                          >
-                            {day ? (
-                              <div className="flex flex-col h-full">
-                                <div
-                                  className={`font-bold nr-300 mb-1 text-center ${isToday ? "text-blue-8" : ""}`}
-                                >
-                                  {day}
-                                </div>
-
-                                <div className="gap-1 overflow-hidden">
-                                  {events.slice(0, 3).map((e, i) => (
-                                    <div
-                                      key={i}
-                                      className={`${EVENT_COLORS[colorKeyOf(e)]} px-1 py-0.25 rounded nr-300 text-[11px] mb-0.75 truncate ${
-                                        e.projected ? "opacity-60" : ""
-                                      }`}
-                                    >
-                                      {e.type === "income" ? "+" : "-"}
-                                      {Number(e.amount).toFixed(2)}€
-                                    </div>
-                                  ))}
-
-                                  {events.length > 3 && (
-                                    <div className="text-gray-400 text-[10px] mt-1">
-                                      +{events.length - 3} more
-                                    </div>
-                                  )}
-                                </div>
+                      return (
+                        <td
+                          key={di}
+                          className={`
+                            border-b border-border p-1 align-top h-24 text-xs transition-colors
+                            last:border-r-0
+                            ${!day ? "bg-surface/50" : "cursor-pointer hover:bg-blue-3"}
+                            ${isToday ? "bg-blue-2" : isSunday && day ? "bg-red-900/10" : ""}
+                            ${isLastRow ? "border-b-0" : ""}
+                          `}
+                          onClick={() =>
+                            day && setModal({ type: "dayActions", data: { day } })
+                          }
+                        >
+                          {day ? (
+                            <div className="flex flex-col h-full">
+                              <div
+                                className={`font-bold nr-300 mb-1 text-center ${isToday ? "text-blue-8" : ""}`}
+                              >
+                                {day}
                               </div>
-                            ) : (
-                              <div className="h-full w-full" />
-                            )}
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  );
-                },
-              )}
+
+                              <div className="gap-1 overflow-hidden">
+                                {groups.slice(0, 3).map((g) => (
+                                  <div
+                                    key={g.key}
+                                    className={`${EVENT_COLORS[g.key]} px-1 py-0.25 rounded nr-300 text-[11px] mb-0.75 truncate ${
+                                      g.allProjected ? "opacity-60" : ""
+                                    }`}
+                                  >
+                                    {g.key === "income" ? "+" : "-"}
+                                    {fmtAmount(g.total)}€
+                                  </div>
+                                ))}
+
+                                {groups.length > 3 && (
+                                  <div className="text-gray-400 text-[10px] mt-1">
+                                    +{groups.length - 3} more
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="h-full w-full" />
+                          )}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
 
-        {/* Budget sidebar */}
-        <div className="flex flex-col">
-          <div className="h-[39px] flex items-center justify-center"></div>
-          {Array.from({ length: Math.ceil(calendarDays.length / 7) }).map(
-            (_, wi) => {
-              const weekDays = calendarDays.slice(wi * 7, (wi + 1) * 7);
-              const firstDayOfWeek = weekDays.find((d) => d !== null);
-              const weekStartDate = firstDayOfWeek
-                ? getWeekStart(
-                    new Date(year, month, firstDayOfWeek),
-                    weekStartDay,
-                  )
-                : null;
+        {/* Weekly budget circles: half over the calendar edge */}
+        {Array.from({ length: weekCount }).map((_, wi) => {
+          const weekDays = calendarDays.slice(wi * 7, (wi + 1) * 7);
+          const firstDayOfWeek = weekDays.find((d) => d !== null);
+          if (!firstDayOfWeek) return null;
+          const weekStartDate = getWeekStart(
+            new Date(year, month, firstDayOfWeek),
+            weekStartDay,
+          );
+          const weekBudget = getWeekBudget(weekStartDate);
+          const weekRemaining = weekBudget - getWeekSpent(weekStartDate);
+          const negative = weekRemaining < 0;
 
-              const weekSpent = weekStartDate ? getWeekSpent(weekStartDate) : 0;
-              const weekBudget = weekStartDate
-                ? getWeekBudget(weekStartDate)
-                : settings?.weeklyBudget || 0;
-              const weekRemaining = weekBudget - weekSpent;
-
-              return (
-                <div
-                  key={wi}
-                  className="h-24 flex items-center justify-center text-center text-xs cursor-pointer hover:bg-blue-3 transition-colors rounded-xl"
-                  onClick={() =>
-                    weekStartDate &&
-                    setModal({
-                      type: "weeklyBudget",
-                      data: {
-                        weekStart: formatDateStr(weekStartDate),
-                        currentBudget: weekBudget,
-                      },
-                    })
-                  }
-                >
-                  {weekStartDate && (
-                    <div
-                      className={`nr-500 text-lg font-bold ${weekRemaining < 0 ? "text-red-400" : "text-text-muted"}`}
-                    >
-                      {weekRemaining.toFixed(0)}€
-                      <div className="text-text-muted nr-400 font-normal text-[10px]">
-                        /{weekBudget}€
-                      </div>
-                    </div>
-                  )}
-                </div>
-              );
-            },
-          )}
-        </div>
+          return (
+            <button
+              key={wi}
+              onClick={() =>
+                setModal({
+                  type: "weeklyBudget",
+                  data: {
+                    weekStart: formatDateStr(weekStartDate),
+                    currentBudget: weekBudget,
+                  },
+                })
+              }
+              title={`Weekly budget: ${weekBudget}€`}
+              className={`absolute z-10 w-12 h-12 rounded-full flex items-center justify-center
+                nr-500 text-xs font-bold cursor-pointer backdrop-blur-md border transition-colors
+                ${
+                  negative
+                    ? "bg-red-500/15 border-red-500/30 text-red-400 hover:bg-red-500/25"
+                    : "bg-white/[0.04] border-white/10 text-gray-11 hover:bg-white/10"
+                }`}
+              style={{
+                top: `${CAL_HEADER_H + wi * CAL_ROW_H + CAL_ROW_H / 2}px`,
+                right: 0,
+                transform: "translate(45%, -50%)",
+              }}
+            >
+              {fmtAmount(Math.round(weekRemaining))}€
+            </button>
+          );
+        })}
       </div>
 
       <InputDashboard
