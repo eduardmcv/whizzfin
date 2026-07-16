@@ -20,23 +20,23 @@ function DayActionsModal({
       onClose={onClose}
       title={`${monthNames[month]} ${day}, ${year}`}
     >
-      <div className="flex flex-col gap-3">
-        <div className="flex gap-2">
+      <div className="flex flex-col gap-4">
+        <div className="flex gap-3">
           <button
-            className="flex-1 px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600"
-            onClick={() => onOpenModal("freeExpense", { day })}
+            className="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 cursor-pointer transition-colors"
+            onClick={() => onOpenModal("addIncome", { day })}
           >
-            + Free
+            + Income
           </button>
           <button
-            className="flex-1 px-4 py-2 bg-orange-500 text-white rounded hover:bg-orange-600"
-            onClick={() => onOpenModal("forecast", { day })}
+            className="flex-1 px-4 py-2.5 bg-red-500 text-white rounded-lg font-medium hover:bg-red-600 cursor-pointer transition-colors"
+            onClick={() => onOpenModal("addExpense", { day })}
           >
-            + Forecast
+            + Expense
           </button>
           <button
-            className="flex-1 px-4 py-2 bg-emerald-600 text-white rounded hover:bg-emerald-700"
-            onClick={() => onOpenModal("savings", { day })}
+            className="flex-1 px-4 py-2.5 bg-emerald-600 text-white rounded-lg font-medium hover:bg-emerald-700 cursor-pointer transition-colors"
+            onClick={() => onOpenModal("addSavings", { day })}
           >
             + Savings
           </button>
@@ -46,7 +46,7 @@ function DayActionsModal({
         {events.length > 0 ? (
           events.map((e, i) => (
             <EventCard
-              key={i}
+              key={e.id ?? `p-${i}`}
               event={e}
               eventColors={eventColors}
               onEdit={onEdit}

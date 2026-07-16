@@ -27,7 +27,7 @@ function SettingsForm({ settings, onSave }) {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+    <form onSubmit={handleSubmit} className="flex flex-col gap-5">
       <div>
         <label className="block text-sm text-text-muted mb-1">
           Weekly budget (€)
@@ -38,7 +38,7 @@ function SettingsForm({ settings, onSave }) {
           onChange={(e) =>
             setForm({ ...form, weeklyBudget: Number(e.target.value) })
           }
-          className="w-full p-2 border border-border rounded bg-background text-text"
+          className="w-full p-2.5 border border-border rounded-lg bg-background text-text focus:outline-none focus:border-blue-7 transition-colors"
         />
       </div>
       <div>
@@ -50,7 +50,7 @@ function SettingsForm({ settings, onSave }) {
           onChange={(e) =>
             setForm({ ...form, weekStartDay: Number(e.target.value) })
           }
-          className="w-full p-2 border border-border rounded bg-background text-text"
+          className="w-full p-2.5 border border-border rounded-lg bg-background text-text focus:outline-none focus:border-blue-7 transition-colors"
         >
           {dayNames.map((d, i) => (
             <option key={i} value={i}>
@@ -69,7 +69,7 @@ function SettingsForm({ settings, onSave }) {
           onChange={(e) =>
             setForm({ ...form, monthlySavingsTarget: Number(e.target.value) })
           }
-          className="w-full p-2 border border-border rounded bg-background text-text"
+          className="w-full p-2.5 border border-border rounded-lg bg-background text-text focus:outline-none focus:border-blue-7 transition-colors"
         />
       </div>
       <div>
@@ -81,7 +81,7 @@ function SettingsForm({ settings, onSave }) {
           onChange={(e) =>
             setForm({ ...form, overflowStrategy: e.target.value })
           }
-          className="w-full p-2 border border-border rounded bg-background text-text"
+          className="w-full p-2.5 border border-border rounded-lg bg-background text-text focus:outline-none focus:border-blue-7 transition-colors"
         >
           <option value="next_week">Deduct from next week</option>
           <option value="proportional">Deduct proportionally</option>
@@ -97,7 +97,7 @@ function SettingsForm({ settings, onSave }) {
           onChange={(e) =>
             setForm({ ...form, surplusStrategy: e.target.value })
           }
-          className="w-full p-2 border border-border rounded bg-background text-text"
+          className="w-full p-2.5 border border-border rounded-lg bg-background text-text focus:outline-none focus:border-blue-7 transition-colors"
         >
           <option value="savings">Add to savings</option>
           <option value="next_week">Add to next week</option>
@@ -106,7 +106,7 @@ function SettingsForm({ settings, onSave }) {
       </div>
       <button
         type="submit"
-        className="w-full p-2 bg-gray-8 text-white rounded hover:bg-gray-7 mt-2"
+        className="w-full py-3 bg-gray-8 text-white rounded-lg font-medium hover:bg-gray-7 mt-2 cursor-pointer transition-colors"
       >
         Save Settings
       </button>

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import db from "./db/database";
 import Modal from "./components/Modal";
 
@@ -6,637 +6,328 @@ import MainDashboard from "./components/MainDashboard";
 import InputDashboard from "./components/InputDashboard";
 import CalendarNavigation from "./components/CalendarNavigation";
 import DayActionsModal from "./components/DayActionsModal";
-import PendingAssignmentsModal from "./components/PendingAssignmentsModal";
-import {
-  getRecurringItemsForMonth,
-  getPendingAssignmentsCount,
-  getAdjustedDay,
-  formatYearMonth,
-  autoCompletePassedInstances,
-} from "./lib/recurring";
+import RulesPanel from "./components/RulesPanel";
 
-import FreeExpenseForm from "./components/forms/FreeExpenseForm";
-import FixedExpenseForm from "./components/forms/FixedExpenseForm";
-import ForecastForm from "./components/forms/ForecastForm";
-import IncomeForm from "./components/forms/IncomeForm";
-import SavingsForm from "./components/forms/SavingsForm";
+import TransactionForm from "./components/forms/TransactionForm";
 import CategoriesForm from "./components/forms/CategoriesForm";
 import SettingsForm from "./components/forms/SettingsForm";
+import WeeklyBudgetForm from "./components/forms/WeeklyBudgetForm";
+
+import {
+  formatYearMonth,
+  toDateStr,
+  todayStr,
+  getMonthOccurrences,
+  isProjected,
+  needsAttention,
+  materializeMonth,
+  skipMonth,
+} from "./lib/rules";
+
+const MONTH_NAMES = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
+
+const EVENT_COLORS = {
+  fixed: "bg-purple-900/40 text-purple-200",
+  forecast: "bg-orange-700/30 text-orange-200",
+  casual: "bg-red-900/40 text-red-200",
+  income: "bg-blue-900/40 text-blue-200",
+  savings: "bg-emerald-900/40 text-emerald-200",
+};
+
+const colorKeyOf = (e) => (e.type === "expense" ? e.kind : e.type);
 
 function App() {
   const [settings, setSettings] = useState(null);
   const [categories, setCategories] = useState([]);
-  const [freeExpenses, setFreeExpenses] = useState([]);
-  const [fixedExpenses, setFixedExpenses] = useState([]);
-  const [forecasts, setForecasts] = useState([]);
-  const [incomes, setIncomes] = useState([]);
-  const [savings, setSavings] = useState([]);
+  const [transactions, setTransactions] = useState([]);
+  const [rules, setRules] = useState([]);
   const [weeklyBudgets, setWeeklyBudgets] = useState([]);
   const [currentDate, setCurrentDate] = useState(new Date());
   const [modal, setModal] = useState({ type: null, data: null });
-  const [selectedDay, setSelectedDay] = useState(null);
-  const [recurringInstances, setRecurringInstances] = useState([]);
 
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
+  const yearMonth = formatYearMonth(year, month);
+  const today = todayStr();
 
-  useEffect(() => {
-    loadAllData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentDate]);
-
-  useEffect(() => {
-    const autoComplete = async () => {
-      if (fixedExpenses.length || incomes.length || savings.length) {
-        const changed = await autoCompletePassedInstances(
-          db,
-          fixedExpenses,
-          incomes,
-          savings,
-          recurringInstances,
-          year,
-          month,
-        );
-        if (changed) {
-          loadAllData();
-        }
-      }
-    };
-    autoComplete();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fixedExpenses, incomes, savings, recurringInstances, year, month]);
-
-  const loadAllData = async () => {
-    const [set, cats, free, fixed, fore, inc, sav, weekBud, recInst] =
-      await Promise.all([
-        db.settings.get(1),
-        db.categories.toArray(),
-        db.freeExpenses.toArray(),
-        db.fixedExpenses.toArray(),
-        db.forecasts.toArray(),
-        db.incomes.toArray(),
-        db.savings.toArray(),
-        db.weeklyBudgets.toArray(),
-        db.recurringInstances.toArray(),
-      ]);
-
+  const loadAllData = useCallback(async () => {
+    const [set, cats, txs, rls, weekBud] = await Promise.all([
+      db.settings.get(1),
+      db.categories.toArray(),
+      db.transactions.toArray(),
+      db.rules.toArray(),
+      db.weeklyBudgets.toArray(),
+    ]);
     setSettings(set);
     setCategories(cats);
-    setFreeExpenses(free);
-    setFixedExpenses(fixed);
-    setForecasts(fore);
-    setIncomes(inc);
-    setSavings(sav);
+    setTransactions(txs);
+    setRules(rls);
     setWeeklyBudgets(weekBud);
-    setRecurringInstances(recInst);
-  };
+  }, []);
 
-  // Week start day (0=Sunday, 1=Monday, etc.)
-  const weekStartDay = settings?.weekStartDay ?? 1;
-
-  // Calendar layout helpers
-  const rawFirstDay = new Date(year, month, 1).getDay(); // 0=Sunday
-  const firstDayOfMonth = (rawFirstDay - weekStartDay + 7) % 7;
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-
-  const monthNames = [
-    "January",
-    "February",
-    "March",
-    "April",
-    "May",
-    "June",
-    "July",
-    "August",
-    "September",
-    "October",
-    "November",
-    "December",
-  ];
-
-  const prevMonth = () => setCurrentDate(new Date(year, month - 1, 1));
-  const nextMonth = () => setCurrentDate(new Date(year, month + 1, 1));
+  // Materialize due auto-rules for the viewed month, then load.
+  // Safe against double-execution: the unique [ruleId+yearMonth] index
+  // makes generation idempotent.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      await materializeMonth(db, year, month);
+      if (!cancelled) await loadAllData();
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [year, month, loadAllData]);
 
   // ---------------------------
-  // Date helpers
+  // Derived month data
   // ---------------------------
-  const toDateStr = (y, m, d) =>
-    `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+  const monthTransactions = useMemo(
+    () => transactions.filter((t) => t.yearMonth === yearMonth),
+    [transactions, yearMonth],
+  );
 
-  const isInCurrentMonth = (dateStr) => {
-    const d = new Date(dateStr);
-    return d.getMonth() === month && d.getFullYear() === year;
-  };
+  const occurrences = useMemo(
+    () => getMonthOccurrences(rules, monthTransactions, year, month),
+    [rules, monthTransactions, year, month],
+  );
 
-  const hasDatePassed = (dateStr) => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const d = new Date(dateStr);
-    d.setHours(0, 0, 0, 0);
-    return d <= today;
-  };
+  const projections = useMemo(
+    () => occurrences.filter(isProjected),
+    [occurrences],
+  );
 
-  const hasDayPassed = (dayOfMonth) => {
-    const today = new Date();
-    const currentMonth = today.getMonth();
-    const currentYear = today.getFullYear();
+  const pendingRules = occurrences.filter(needsAttention).length;
 
-    // If viewing the real current month, compare day numbers
-    if (month === currentMonth && year === currentYear) {
-      return dayOfMonth <= today.getDate();
-    }
-    // If viewing a past month, everything is considered passed
-    if (year < currentYear || (year === currentYear && month < currentMonth)) {
-      return true;
-    }
-    // Future month => nothing passed
-    return false;
-  };
-
-  // ---------------------------
-  // Recurring instance helpers
-  // ---------------------------
-  const getInstanceFor = (parentType, parentId, yearMonth) =>
-    recurringInstances.find(
-      (inst) =>
-        inst.parentType === parentType &&
-        inst.parentId === parentId &&
-        inst.yearMonth === yearMonth,
-    );
-
-  const getEffectiveOccurrenceDate = (template, instance, y, m) => {
-    // Assigned date is the truth
-    if (instance?.status === "assigned" && instance.assignedDate) {
-      return instance.assignedDate;
-    }
-    // Otherwise predict from fixed day
-    if (template?.dateType === "fixed" && template?.dayOfMonth) {
-      const adjusted = getAdjustedDay(template.dayOfMonth, y, m);
-      return toDateStr(y, m, adjusted);
-    }
-    // One-time fallback
-    return template?.date ?? null;
-  };
-
-  // ---------------------------
-  // Events per day (calendar display)
-  // ---------------------------
-  const getEventsForDay = (day) => {
-    const events = [];
-    const dateStr = toDateStr(year, month, day);
-    const yearMonth = formatYearMonth(year, month);
-
-    // Fixed expenses
-    fixedExpenses
-      .filter((e) => {
-        if (e.active === false) return false;
-
-        if (e.isRecurring) {
-          const instance = getInstanceFor("fixedExpense", e.id, yearMonth);
-
-          if (instance) {
-            if (instance.status === "assigned" && instance.assignedDate) {
-              return instance.assignedDate === dateStr;
-            }
-            // skipped/pending => not shown on calendar
-            return false;
-          }
-
-          if (e.dateType === "fixed" && e.dayOfMonth) {
-            const adjustedDay = getAdjustedDay(e.dayOfMonth, year, month);
-            return adjustedDay === day;
-          }
-
-          return false;
-        }
-
-        return e.date === dateStr;
-      })
-      .forEach((e) => {
-        const instance = getInstanceFor("fixedExpense", e.id, yearMonth);
-        events.push({
-          type: "fixed",
-          ...e,
-          amount: instance?.actualAmount ?? e.amount,
-        });
+  // Events per day: real transactions + projected rule occurrences.
+  const eventsByDate = useMemo(() => {
+    const map = {};
+    const push = (date, event) => {
+      if (!map[date]) map[date] = [];
+      map[date].push(event);
+    };
+    monthTransactions.forEach((t) => push(t.date, t));
+    projections.forEach((occ) => {
+      if (!occ.date) return; // manual presets have no date yet
+      push(occ.date, {
+        type: occ.rule.type,
+        kind: occ.rule.type === "expense" ? "fixed" : null,
+        title: occ.rule.title,
+        amount: occ.amount,
+        ruleId: occ.rule.id,
+        projected: true,
       });
+    });
+    return map;
+  }, [monthTransactions, projections]);
 
-    // Forecasts
-    forecasts
-      .filter((f) => f.date === dateStr)
-      .forEach((f) => events.push({ type: "forecast", ...f }));
-
-    // Free expenses
-    freeExpenses
-      .filter((e) => e.date === dateStr)
-      .forEach((e) => events.push({ type: "free", ...e }));
-
-    // Incomes
-    incomes
-      .filter((i) => {
-        if (i.isRecurring) {
-          const instance = getInstanceFor("income", i.id, yearMonth);
-
-          if (instance) {
-            if (instance.status === "assigned" && instance.assignedDate) {
-              return instance.assignedDate === dateStr;
-            }
-            return false;
-          }
-
-          if (i.dateType === "fixed" && i.dayOfMonth) {
-            const adjustedDay = getAdjustedDay(i.dayOfMonth, year, month);
-            return adjustedDay === day;
-          }
-
-          return false;
-        }
-
-        return i.date === dateStr;
-      })
-      .forEach((i) => {
-        const instance = getInstanceFor("income", i.id, yearMonth);
-        events.push({
-          type: "income",
-          ...i,
-          amount: instance?.actualAmount ?? i.amount,
-        });
-      });
-
-    // Savings
-    savings
-      .filter((s) => {
-        if (s.isRecurring) {
-          const instance = getInstanceFor("savings", s.id, yearMonth);
-
-          if (instance) {
-            if (instance.status === "assigned" && instance.assignedDate) {
-              return instance.assignedDate === dateStr;
-            }
-            return false;
-          }
-
-          if (s.dateType === "fixed" && s.dayOfMonth) {
-            const adjustedDay = getAdjustedDay(s.dayOfMonth, year, month);
-            return adjustedDay === day;
-          }
-
-          return false;
-        }
-
-        return s.date === dateStr;
-      })
-      .forEach((s) => {
-        const instance = getInstanceFor("savings", s.id, yearMonth);
-        events.push({
-          type: "savings",
-          ...s,
-          amount: instance?.actualAmount ?? s.amount,
-        });
-      });
-
-    return events;
-  };
+  const getEventsForDay = (day) =>
+    eventsByDate[toDateStr(year, month, day)] || [];
 
   // ---------------------------
   // Week + budget helpers
   // ---------------------------
-  const getWeekStart = (date, weekStartDay = 1) => {
+  const weekStartDay = settings?.weekStartDay ?? 1;
+
+  const getWeekStart = (date, startDay = 1) => {
     const d = new Date(date);
     d.setHours(0, 0, 0, 0);
-    const currentDay = d.getDay();
-    const diff = (currentDay - weekStartDay + 7) % 7;
+    const diff = (d.getDay() - startDay + 7) % 7;
     d.setDate(d.getDate() - diff);
     return d;
   };
 
-  const formatDateStr = (date) => {
-    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(
-      2,
-      "0",
-    )}-${String(date.getDate()).padStart(2, "0")}`;
-  };
+  const formatDateStr = (date) =>
+    toDateStr(date.getFullYear(), date.getMonth(), date.getDate());
 
   const getWeekBudget = (weekStartDate) => {
     const weekStartStr = formatDateStr(weekStartDate);
-    const customBudget = weeklyBudgets.find(
-      (wb) => wb.weekStart === weekStartStr,
-    );
-    return customBudget?.amount ?? (settings?.weeklyBudget || 0);
+    const custom = weeklyBudgets.find((wb) => wb.weekStart === weekStartStr);
+    return custom?.amount ?? (settings?.weeklyBudget || 0);
   };
 
-  // Free expenses + forecasts with deductFrom="weekly"
+  // Casual expenses + forecasts marked "weekly" count against the week.
   const getWeekSpent = (weekStartDate) => {
-    const weekEnd = new Date(weekStartDate);
-    weekEnd.setDate(weekEnd.getDate() + 6);
-    weekEnd.setHours(23, 59, 59, 999);
+    const startStr = formatDateStr(weekStartDate);
+    const end = new Date(weekStartDate);
+    end.setDate(end.getDate() + 6);
+    const endStr = formatDateStr(end);
 
-    const freeSpent = freeExpenses
-      .filter((e) => {
-        const d = new Date(e.date);
-        return d >= weekStartDate && d <= weekEnd;
-      })
-      .reduce((sum, e) => sum + e.amount, 0);
-
-    const forecastSpent = forecasts
-      .filter((f) => {
-        if (f.deductFrom !== "weekly") return false;
-        const d = new Date(f.date);
-        return d >= weekStartDate && d <= weekEnd;
-      })
-      .reduce((sum, f) => sum + f.amount, 0);
-
-    return freeSpent + forecastSpent;
+    return transactions
+      .filter(
+        (t) =>
+          t.type === "expense" &&
+          (t.kind === "casual" ||
+            (t.kind === "forecast" && t.deductFrom === "weekly")) &&
+          t.date >= startStr &&
+          t.date <= endStr,
+      )
+      .reduce((sum, t) => sum + t.amount, 0);
   };
 
   // ---------------------------
-  // Dashboard calculation
+  // Dashboard
   // ---------------------------
-  const calculateDashboard = () => {
-    const yearMonth = formatYearMonth(year, month);
+  const dashboard = useMemo(() => {
+    const signOf = (t) => (t.type === "income" ? 1 : -1);
 
-    const thisMonthFree = freeExpenses.filter((e) => isInCurrentMonth(e.date));
-    const thisMonthForecasts = forecasts.filter((f) =>
-      isInCurrentMonth(f.date),
+    // Current balance: only facts up to today.
+    const currentBalance = monthTransactions
+      .filter((t) => t.date <= today)
+      .reduce((sum, t) => sum + signOf(t) * t.amount, 0);
+
+    // Projected rule occurrences that haven't materialized yet.
+    const projectedByType = { income: 0, expense: 0, savings: 0 };
+    projections.forEach((occ) => {
+      projectedByType[occ.rule.type] += occ.amount;
+    });
+
+    const sumTx = (pred) =>
+      monthTransactions.filter(pred).reduce((s, t) => s + t.amount, 0);
+
+    const totalIncome =
+      sumTx((t) => t.type === "income") + projectedByType.income;
+    const totalSavings =
+      sumTx((t) => t.type === "savings") + projectedByType.savings;
+    const totalFixed =
+      sumTx((t) => t.type === "expense" && t.kind === "fixed") +
+      projectedByType.expense;
+    const totalExpenses =
+      sumTx((t) => t.type === "expense") + projectedByType.expense;
+
+    // Pending forecasts that come out of the monthly balance
+    // (weekly ones are already inside the weekly budgets).
+    const totalForecasts = sumTx(
+      (t) =>
+        t.type === "expense" &&
+        t.kind === "forecast" &&
+        t.deductFrom !== "weekly" &&
+        t.date > today,
     );
-    const thisMonthSavings = savings.filter((s) =>
-      s.date ? isInCurrentMonth(s.date) : true,
-    );
-
-    // --- CURRENT BALANCE (up to today) ---
-    const incomeReceived = incomes.reduce((sum, i) => {
-      if (i.isRecurring) {
-        const inst = getInstanceFor("income", i.id, yearMonth);
-
-        // If there is an instance, only count it if assigned and passed
-        if (inst) {
-          if (inst.status !== "assigned") return sum;
-          const occ = getEffectiveOccurrenceDate(i, inst, year, month);
-          if (occ && hasDatePassed(occ)) {
-            return sum + (inst.actualAmount ?? i.amount);
-          }
-          return sum;
-        }
-
-        // No instance yet => predict by fixed day
-        const occ = getEffectiveOccurrenceDate(i, null, year, month);
-        if (occ && hasDatePassed(occ)) return sum + i.amount;
-        return sum;
-      }
-
-      // One-time income
-      if (i.date && isInCurrentMonth(i.date) && hasDatePassed(i.date)) {
-        return sum + i.amount;
-      }
-      return sum;
-    }, 0);
-
-    const fixedPaid = fixedExpenses.reduce((sum, e) => {
-      if (e.active === false) return sum;
-
-      if (e.isRecurring) {
-        const inst = getInstanceFor("fixedExpense", e.id, yearMonth);
-
-        if (inst) {
-          if (inst.status !== "assigned") return sum;
-          const occ = getEffectiveOccurrenceDate(e, inst, year, month);
-          if (occ && hasDatePassed(occ)) {
-            return sum + (inst.actualAmount ?? e.amount);
-          }
-          return sum;
-        }
-
-        const occ = getEffectiveOccurrenceDate(e, null, year, month);
-        if (occ && hasDatePassed(occ)) return sum + e.amount;
-        return sum;
-      }
-
-      // One-time fixed expense
-      if (e.date && isInCurrentMonth(e.date) && hasDatePassed(e.date)) {
-        return sum + e.amount;
-      }
-
-      // Legacy fallback (if you still have fixed items with just dayOfMonth)
-      if (!e.date && e.dayOfMonth && hasDayPassed(e.dayOfMonth)) {
-        return sum + e.amount;
-      }
-
-      return sum;
-    }, 0);
-
-    const freePaid = thisMonthFree
-      .filter((e) => hasDatePassed(e.date))
-      .reduce((sum, e) => sum + e.amount, 0);
-
-    const forecastsPaid = thisMonthForecasts
-      .filter((f) => f.status === "completed" || hasDatePassed(f.date))
-      .reduce((sum, f) => sum + f.amount, 0);
-
-    const savingsMade = savings.reduce((sum, s) => {
-      if (s.isRecurring) {
-        const inst = getInstanceFor("savings", s.id, yearMonth);
-
-        if (inst) {
-          if (inst.status !== "assigned") return sum;
-          const occ = getEffectiveOccurrenceDate(s, inst, year, month);
-          if (occ && hasDatePassed(occ)) {
-            return sum + (inst.actualAmount ?? s.amount);
-          }
-          return sum;
-        }
-
-        const occ = getEffectiveOccurrenceDate(s, null, year, month);
-        if (occ && hasDatePassed(occ)) return sum + s.amount;
-        return sum;
-      }
-
-      if (s.date && isInCurrentMonth(s.date) && hasDatePassed(s.date)) {
-        return sum + s.amount;
-      }
-      return sum;
-    }, 0);
-
-    const currentBalance =
-      incomeReceived - savingsMade - fixedPaid - freePaid - forecastsPaid;
-
-    // --- MONTH-END FORECAST (end-of-month estimation for the VIEWED month) ---
-    const totalIncome = incomes.reduce((sum, i) => {
-      if (i.isRecurring) return sum + i.amount;
-      if (i.date && isInCurrentMonth(i.date)) return sum + i.amount;
-      return sum;
-    }, 0);
-
-    const totalFixed = fixedExpenses
-      .filter((e) => e.active !== false)
-      .reduce((sum, e) => sum + e.amount, 0);
-
-    const totalForecasts = thisMonthForecasts
-      .filter((f) => f.status === "pending")
-      .reduce((sum, f) => sum + f.amount, 0);
-
-    const totalSavings = thisMonthSavings.reduce(
-      (sum, s) => sum + (s.amount || 0),
-      0,
+    const paidForecasts = sumTx(
+      (t) =>
+        t.type === "expense" &&
+        t.kind === "forecast" &&
+        t.deductFrom !== "weekly" &&
+        t.date <= today,
     );
 
-    // --- Weekly budgets for this viewed month ---
-    // Week belongs to the month where it STARTS (same rule you wrote)
-    const getWeeksInViewedMonth = (y, m, weekStartDay) => {
-      const weeks = [];
-      const firstOfMonth = new Date(y, m, 1);
-
-      let weekStart = getWeekStart(firstOfMonth, weekStartDay);
-
-      // If that week start is in previous month, move to next week
-      if (weekStart.getMonth() !== m || weekStart.getFullYear() !== y) {
-        weekStart.setDate(weekStart.getDate() + 7);
-      }
-
-      while (weekStart.getMonth() === m && weekStart.getFullYear() === y) {
-        weeks.push(new Date(weekStart));
-        weekStart.setDate(weekStart.getDate() + 7);
-      }
-
-      return weeks;
-    };
-
-    const weeksThisMonth = getWeeksInViewedMonth(year, month, weekStartDay);
+    // Weeks belonging to the viewed month (week belongs to the month it starts in)
+    const weeks = [];
+    let ws = getWeekStart(new Date(year, month, 1), weekStartDay);
+    if (ws.getMonth() !== month || ws.getFullYear() !== year) {
+      ws.setDate(ws.getDate() + 7);
+    }
+    while (ws.getMonth() === month && ws.getFullYear() === year) {
+      weeks.push(new Date(ws));
+      ws.setDate(ws.getDate() + 7);
+    }
 
     let totalWeeklyBudgets = 0;
     let totalWeeklySpent = 0;
     let totalOverspending = 0;
-
-    weeksThisMonth.forEach((weekStartDate) => {
-      const weekBudget = getWeekBudget(weekStartDate);
-      const weekSpent = getWeekSpent(weekStartDate);
-
-      totalWeeklyBudgets += weekBudget;
-      totalWeeklySpent += weekSpent;
-
-      if (weekSpent > weekBudget) {
-        totalOverspending += weekSpent - weekBudget;
-      }
+    weeks.forEach((weekStart) => {
+      const budget = getWeekBudget(weekStart);
+      const spent = getWeekSpent(weekStart);
+      totalWeeklyBudgets += budget;
+      totalWeeklySpent += spent;
+      if (spent > budget) totalOverspending += spent - budget;
     });
-
-    const totalWeeklyRemaining = totalWeeklyBudgets - totalWeeklySpent;
 
     const monthEndForecast =
       totalIncome -
       totalSavings -
       totalFixed -
       totalForecasts -
+      paidForecasts -
       totalWeeklyBudgets -
       totalOverspending;
-
-    // --- Current week budget (relative to today) ---
-    // If you're viewing another month, this is still "today's week", which is fine for the top dashboard
-    const now = new Date();
-    const currentWeekStart = getWeekStart(now, weekStartDay);
-    const weeklySpent = getWeekSpent(currentWeekStart);
-    const weekStartStr = formatDateStr(currentWeekStart);
-    const customBudget = weeklyBudgets.find(
-      (wb) => wb.weekStart === weekStartStr,
-    );
-    const weeklyBudget = customBudget?.amount ?? (settings?.weeklyBudget || 0);
-    const weeklyRemaining = weeklyBudget - weeklySpent;
 
     return {
       currentBalance,
       monthEndForecast,
       totalIncome,
+      totalExpenses,
       totalFixed,
       totalForecasts,
-      totalWeeklyBudgets,
-      totalWeeklyRemaining,
-      totalOverspending,
       totalSavings,
-      weeklySpent,
-      weeklyBudget,
-      weeklyRemaining,
+      totalWeeklyBudgets,
+      totalWeeklyRemaining: totalWeeklyBudgets - totalWeeklySpent,
+      totalOverspending,
     };
-  };
-
-  const dashboard = calculateDashboard();
-
-  // Recurring items for the month (PendingAssignmentsModal)
-  const recurringItems = getRecurringItemsForMonth(
-    fixedExpenses,
-    incomes,
-    savings,
-    recurringInstances,
-    year,
-    month,
-  );
-  const pendingCount = getPendingAssignmentsCount(recurringItems);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [monthTransactions, projections, weeklyBudgets, settings, year, month]);
 
   // ---------------------------
-  // UI handlers
+  // Calendar layout
   // ---------------------------
-  const handleDayClick = (day) => {
-    setSelectedDay(day);
-    setModal({ type: "dayActions", data: { day } });
-  };
+  const rawFirstDay = new Date(year, month, 1).getDay();
+  const firstDayOfMonth = (rawFirstDay - weekStartDay + 7) % 7;
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
 
-  const closeModal = () => {
-    setModal({ type: null, data: null });
-    setSelectedDay(null);
-    loadAllData();
-  };
-
-  const handleDelete = async (type, id) => {
-    // eslint-disable-next-line no-restricted-globals
-    if (!confirm("Are you sure you want to delete this?")) return;
-
-    switch (type) {
-      case "free":
-        await db.freeExpenses.delete(id);
-        break;
-      case "fixed":
-        await db.fixedExpenses.delete(id);
-        break;
-      case "forecast":
-        await db.forecasts.delete(id);
-        break;
-      case "income":
-        await db.incomes.delete(id);
-        break;
-      case "savings":
-        await db.savings.delete(id);
-        break;
-      default:
-        break;
-    }
-    loadAllData();
-  };
-
-  const handleEdit = (type, item) => {
-    setModal({
-      type: `edit${type.charAt(0).toUpperCase() + type.slice(1)}`,
-      data: item,
-    });
-  };
-
-  // Calendar cells
   const calendarDays = [];
   for (let i = 0; i < firstDayOfMonth; i++) calendarDays.push(null);
   for (let day = 1; day <= daysInMonth; day++) calendarDays.push(day);
   while (calendarDays.length % 7 !== 0) calendarDays.push(null);
 
-  const eventColors = {
-    fixed: "bg-purple-900/40 text-purple-200",
-    forecast: "bg-orange-700/30 text-orange-200",
-    free: "bg-red-900/40 text-red-200",
-    income: "bg-blue-900/40 text-blue-200",
-    savings: "bg-emerald-900/40 text-emerald-200",
-  };
-
   const getDayNames = () => {
     const allDays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-    const result = [];
-    for (let i = 0; i < 7; i++) {
-      result.push(allDays[(weekStartDay + i) % 7]);
+    return Array.from({ length: 7 }, (_, i) => allDays[(weekStartDay + i) % 7]);
+  };
+
+  const prevMonth = () => setCurrentDate(new Date(year, month - 1, 1));
+  const nextMonth = () => setCurrentDate(new Date(year, month + 1, 1));
+
+  // ---------------------------
+  // Handlers
+  // ---------------------------
+  const closeModal = () => {
+    setModal({ type: null, data: null });
+    loadAllData();
+  };
+
+  const handleEditEvent = (event) => {
+    setModal({ type: "editTransaction", data: event });
+  };
+
+  const handleDeleteEvent = async (event) => {
+    if (event.ruleId != null) {
+      const rule = rules.find((r) => r.id === event.ruleId);
+      if (
+        !confirm(
+          "This entry was generated by a rule. Deleting it skips the rule for this month (you can undo it from the Rules panel).",
+        )
+      )
+        return;
+      if (rule) {
+        await skipMonth(db, rule, event.yearMonth);
+      } else {
+        await db.transactions.delete(event.id);
+      }
+    } else {
+      if (!confirm("Delete this entry?")) return;
+      await db.transactions.delete(event.id);
     }
-    return result;
+    loadAllData();
+  };
+
+  const addModalType = {
+    addIncome: "income",
+    addExpense: "expense",
+    addSavings: "savings",
   };
 
   return (
@@ -648,7 +339,7 @@ function App() {
       <CalendarNavigation
         month={month}
         year={year}
-        monthNames={monthNames}
+        monthNames={MONTH_NAMES}
         onPrevMonth={prevMonth}
         onNextMonth={nextMonth}
       />
@@ -666,13 +357,13 @@ function App() {
               <tr>
                 {getDayNames().map((d, i) => {
                   const actualDay = (weekStartDay + i) % 7;
-                  const isWeekend = actualDay === 0 || actualDay === 6;
+                  const isSunday = actualDay === 0;
                   return (
                     <th
                       key={d}
-                      className={`p-2 border-b border-r border-border text-sm font-bold 
+                      className={`p-2 border-b border-r border-border text-sm font-bold
                         last:border-r-0
-                        ${isWeekend ? "bg-red-900/10" : "bg-surface"}`}
+                        ${isSunday ? "bg-red-900/10" : "bg-surface"}`}
                     >
                       {d}
                     </th>
@@ -692,13 +383,10 @@ function App() {
                     <tr key={wi}>
                       {weekDays.map((day, di) => {
                         const isToday =
-                          day &&
-                          new Date().getDate() === day &&
-                          new Date().getMonth() === month &&
-                          new Date().getFullYear() === year;
-
+                          day && toDateStr(year, month, day) === today;
                         const actualDay = (weekStartDay + di) % 7;
-                        const isWeekend = actualDay === 0 || actualDay === 6;
+                        const isSunday = actualDay === 0;
+                        const events = day ? getEventsForDay(day) : [];
 
                         return (
                           <td
@@ -707,10 +395,12 @@ function App() {
                               border-b border-border p-1 align-top h-24 text-xs transition-colors
                               last:border-r-0
                               ${!day ? "bg-surface/50" : "cursor-pointer hover:bg-blue-3"}
-                              ${isToday ? "bg-blue-2" : isWeekend && day ? "bg-red-900/10" : ""}
+                              ${isToday ? "bg-blue-2" : isSunday && day ? "bg-red-900/10" : ""}
                               ${isLastRow ? "border-b-0" : ""}
                             `}
-                            onClick={() => day && handleDayClick(day)}
+                            onClick={() =>
+                              day && setModal({ type: "dayActions", data: { day } })
+                            }
                           >
                             {day ? (
                               <div className="flex flex-col h-full">
@@ -721,24 +411,21 @@ function App() {
                                 </div>
 
                                 <div className="gap-1 overflow-hidden">
-                                  {getEventsForDay(day)
-                                    .slice(0, 3)
-                                    .map((e, i) => (
-                                      <div
-                                        key={i}
-                                        className={`${eventColors[e.type]} px-1 py-0.25 rounded nr-300 text-[11px] mb-0.75 truncate`}
-                                      >
-                                        {e.type === "income" ||
-                                        e.type === "savings"
-                                          ? "+"
-                                          : "-"}
-                                        {e.amount}€
-                                      </div>
-                                    ))}
+                                  {events.slice(0, 3).map((e, i) => (
+                                    <div
+                                      key={i}
+                                      className={`${EVENT_COLORS[colorKeyOf(e)]} px-1 py-0.25 rounded nr-300 text-[11px] mb-0.75 truncate ${
+                                        e.projected ? "opacity-60" : ""
+                                      }`}
+                                    >
+                                      {e.type === "income" ? "+" : "-"}
+                                      {Number(e.amount).toFixed(2)}€
+                                    </div>
+                                  ))}
 
-                                  {getEventsForDay(day).length > 3 && (
+                                  {events.length > 3 && (
                                     <div className="text-gray-400 text-[10px] mt-1">
-                                      +{getEventsForDay(day).length - 3} more
+                                      +{events.length - 3} more
                                     </div>
                                   )}
                                 </div>
@@ -758,7 +445,7 @@ function App() {
         </div>
 
         {/* Budget sidebar */}
-        <div className="flex flex-col ">
+        <div className="flex flex-col">
           <div className="h-[39px] flex items-center justify-center"></div>
           {Array.from({ length: Math.ceil(calendarDays.length / 7) }).map(
             (_, wi) => {
@@ -811,8 +498,8 @@ function App() {
 
       <InputDashboard
         data={dashboard}
-        onOpenModal={(type) => setModal({ type })}
-        pendingCount={pendingCount}
+        onOpenModal={(type, data) => setModal({ type, data })}
+        pendingRules={pendingRules}
       />
 
       <DayActionsModal
@@ -821,82 +508,70 @@ function App() {
         day={modal.data?.day}
         month={month}
         year={year}
-        monthNames={monthNames}
+        monthNames={MONTH_NAMES}
         events={modal.data?.day ? getEventsForDay(modal.data.day) : []}
-        eventColors={eventColors}
+        eventColors={EVENT_COLORS}
         onOpenModal={(type, data) => setModal({ type, data })}
-        onEdit={handleEdit}
-        onDelete={handleDelete}
+        onEdit={handleEditEvent}
+        onDelete={handleDeleteEvent}
       />
 
-      {/* Add Modals */}
+      {/* Add transaction modals */}
+      {Object.entries(addModalType).map(([modalType, txType]) => (
+        <Modal
+          key={modalType}
+          isOpen={modal.type === modalType}
+          onClose={closeModal}
+          title={`Add ${txType === "income" ? "Income" : txType === "expense" ? "Expense" : "Savings"}`}
+        >
+          <TransactionForm
+            type={txType}
+            categories={categories}
+            defaultDay={modal.data?.day}
+            year={year}
+            month={month}
+            onSave={closeModal}
+            onCategoriesChanged={loadAllData}
+          />
+        </Modal>
+      ))}
+
+      {/* Edit transaction */}
       <Modal
-        isOpen={modal.type === "freeExpense"}
+        isOpen={modal.type === "editTransaction"}
         onClose={closeModal}
-        title="Add Free Expense"
+        title="Edit entry"
       >
-        <FreeExpenseForm
-          categories={categories}
-          defaultDay={modal.data?.day}
-          year={year}
-          month={month}
-          onSave={closeModal}
-          onCategoriesChanged={loadAllData}
-        />
+        {modal.data && (
+          <TransactionForm
+            type={modal.data.type}
+            categories={categories}
+            year={year}
+            month={month}
+            editData={modal.data}
+            onSave={closeModal}
+            onCategoriesChanged={loadAllData}
+          />
+        )}
       </Modal>
 
+      {/* Edit rule */}
       <Modal
-        isOpen={modal.type === "fixedExpense"}
+        isOpen={modal.type === "editRule"}
         onClose={closeModal}
-        title="Add Fixed Expense"
+        title="Edit rule"
       >
-        <FixedExpenseForm
-          categories={categories}
-          onSave={closeModal}
-          onCategoriesChanged={loadAllData}
-        />
-      </Modal>
-
-      <Modal
-        isOpen={modal.type === "forecast"}
-        onClose={closeModal}
-        title="Add Forecast"
-      >
-        <ForecastForm
-          categories={categories}
-          defaultDay={modal.data?.day}
-          year={year}
-          month={month}
-          onSave={closeModal}
-          onCategoriesChanged={loadAllData}
-        />
-      </Modal>
-
-      <Modal
-        isOpen={modal.type === "income"}
-        onClose={closeModal}
-        title="Add Income"
-      >
-        <IncomeForm
-          categories={categories}
-          onSave={closeModal}
-          onCategoriesChanged={loadAllData}
-        />
-      </Modal>
-
-      <Modal
-        isOpen={modal.type === "savings"}
-        onClose={closeModal}
-        title="Add Savings"
-      >
-        <SavingsForm
-          categories={categories}
-          defaultDay={modal.data?.day}
-          year={year}
-          month={month}
-          onSave={closeModal}
-          onCategoriesChanged={loadAllData}
-        />
+        {modal.data && (
+          <TransactionForm
+            type={modal.data.type}
+            categories={categories}
+            year={year}
+            month={month}
+            editRule={modal.data}
+            onSave={closeModal}
+            onCategoriesChanged={loadAllData}
+          />
+        )}
       </Modal>
 
       <Modal
@@ -904,7 +579,11 @@ function App() {
         onClose={closeModal}
         title="Manage Categories"
       >
-        <CategoriesForm categories={categories} onSave={closeModal} />
+        <CategoriesForm
+          categories={categories}
+          onSave={closeModal}
+          onChanged={loadAllData}
+        />
       </Modal>
 
       <Modal
@@ -915,79 +594,6 @@ function App() {
         <SettingsForm settings={settings} onSave={closeModal} />
       </Modal>
 
-      {/* Edit Modals */}
-      <Modal
-        isOpen={modal.type === "editFree"}
-        onClose={closeModal}
-        title="Edit Free Expense"
-      >
-        <FreeExpenseForm
-          categories={categories}
-          year={year}
-          month={month}
-          onSave={closeModal}
-          editData={modal.data}
-          onCategoriesChanged={loadAllData}
-        />
-      </Modal>
-
-      <Modal
-        isOpen={modal.type === "editFixed"}
-        onClose={closeModal}
-        title="Edit Fixed Expense"
-      >
-        <FixedExpenseForm
-          categories={categories}
-          onSave={closeModal}
-          editData={modal.data}
-          onCategoriesChanged={loadAllData}
-        />
-      </Modal>
-
-      <Modal
-        isOpen={modal.type === "editForecast"}
-        onClose={closeModal}
-        title="Edit Forecast"
-      >
-        <ForecastForm
-          categories={categories}
-          year={year}
-          month={month}
-          onSave={closeModal}
-          editData={modal.data}
-          onCategoriesChanged={loadAllData}
-        />
-      </Modal>
-
-      <Modal
-        isOpen={modal.type === "editIncome"}
-        onClose={closeModal}
-        title="Edit Income"
-      >
-        <IncomeForm
-          categories={categories}
-          onSave={closeModal}
-          editData={modal.data}
-          onCategoriesChanged={loadAllData}
-        />
-      </Modal>
-
-      <Modal
-        isOpen={modal.type === "editSavings"}
-        onClose={closeModal}
-        title="Edit Savings"
-      >
-        <SavingsForm
-          categories={categories}
-          year={year}
-          month={month}
-          onSave={closeModal}
-          editData={modal.data}
-          onCategoriesChanged={loadAllData}
-        />
-      </Modal>
-
-      {/* Weekly Budget Edit Modal */}
       <Modal
         isOpen={modal.type === "weeklyBudget"}
         onClose={closeModal}
@@ -1001,101 +607,18 @@ function App() {
         />
       </Modal>
 
-      {/* Pending Assignments Modal */}
-      <PendingAssignmentsModal
-        isOpen={modal.type === "pendingAssignments"}
+      <RulesPanel
+        isOpen={modal.type === "rules"}
         onClose={closeModal}
-        recurringItems={recurringItems}
+        rules={rules}
+        transactions={transactions}
+        categories={categories}
         year={year}
         month={month}
         onUpdate={loadAllData}
-        onEditTemplate={(item) => {
-          const editType = {
-            income: "editIncome",
-            fixedExpense: "editFixed",
-            savings: "editSavings",
-          }[item.parentType];
-
-          setModal({ type: editType, data: item });
-        }}
+        onEditRule={(rule) => setModal({ type: "editRule", data: rule })}
       />
     </div>
-  );
-}
-
-// ------------------------------------
-// WeeklyBudgetForm
-// ------------------------------------
-function WeeklyBudgetForm({ weekStart, currentBudget, defaultBudget, onSave }) {
-  const [amount, setAmount] = useState(currentBudget ?? defaultBudget);
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-
-    const existing = await db.weeklyBudgets
-      .where("weekStart")
-      .equals(weekStart)
-      .first();
-
-    if (amount === defaultBudget) {
-      if (existing) await db.weeklyBudgets.delete(existing.id);
-    } else {
-      if (existing) {
-        await db.weeklyBudgets.update(existing.id, { amount });
-      } else {
-        await db.weeklyBudgets.add({ weekStart, amount });
-      }
-    }
-
-    onSave();
-  };
-
-  const handleReset = async () => {
-    setAmount(defaultBudget);
-    const existing = await db.weeklyBudgets
-      .where("weekStart")
-      .equals(weekStart)
-      .first();
-    if (existing) {
-      await db.weeklyBudgets.delete(existing.id);
-    }
-    onSave();
-  };
-
-  return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-      <div>
-        <label className="block text-sm text-text-muted mb-1">
-          Week starting {weekStart}
-        </label>
-        <input
-          type="number"
-          value={amount}
-          onChange={(e) => setAmount(Number(e.target.value))}
-          className="w-full p-2 border border-border rounded bg-background text-text"
-          min="0"
-          step="1"
-        />
-        <p className="text-xs text-text-muted mt-1">
-          Default budget: {defaultBudget}€
-        </p>
-      </div>
-      <div className="flex gap-2">
-        <button
-          type="submit"
-          className="flex-1 p-2 bg-gray-8 text-white rounded hover:bg-gray-7"
-        >
-          Save
-        </button>
-        <button
-          type="button"
-          onClick={handleReset}
-          className="p-2 border border-border rounded hover:bg-surface text-text-muted"
-        >
-          Reset to default
-        </button>
-      </div>
-    </form>
   );
 }
 

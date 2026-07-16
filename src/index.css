@@ -61,24 +61,108 @@ body {
   @apply bg-background text-text;
 }
 
-/* Date picker icon */
-input[type="date"]::-webkit-calendar-picker-indicator {
-  filter: invert(1);
-  cursor: pointer;
+/* ------------------------------------------------------------------ */
+/* Scrollbars                                                          */
+/* ------------------------------------------------------------------ */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-gray-5) transparent;
 }
 
-/* Date picker and number input styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-gray-5);
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-gray-7);
+  background-clip: padding-box;
+}
+
+/* ------------------------------------------------------------------ */
+/* Form controls                                                       */
+/* ------------------------------------------------------------------ */
+
+/* Date picker icon */
+input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: invert(0.7);
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity 0.15s ease;
+}
+input[type="date"]::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
+}
+
 input[type="date"],
 input[type="number"] {
   color-scheme: dark;
 }
 
-/* Number input spinner */
+/* Hide number input spinners — cleaner fields */
 input[type="number"]::-webkit-inner-spin-button,
 input[type="number"]::-webkit-outer-spin-button {
-  opacity: 1;
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
 }
 
+/* Checkboxes */
+input[type="checkbox"] {
+  accent-color: var(--color-blue-9);
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+/* ------------------------------------------------------------------ */
+/* Animations                                                          */
+/* ------------------------------------------------------------------ */
+@keyframes overlay-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(56px) scale(0.98);
+  }
+}
+
+@keyframes grow-in {
+  from {
+    opacity: 0;
+    transform: scaleY(0.6);
+  }
+}
+
+.animate-overlay-in {
+  animation: overlay-in 0.2s ease-out;
+}
+.animate-modal-in {
+  animation: modal-in 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.animate-grow-in {
+  animation: grow-in 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+  transform-origin: top;
+}
+
+/* ------------------------------------------------------------------ */
+/* Type utilities                                                      */
+/* ------------------------------------------------------------------ */
 .nr-100 {
   font-family: var(--font-main-numbers);
   font-weight: 100;
